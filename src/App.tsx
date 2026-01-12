@@ -15,6 +15,12 @@ import Contrato from "./pages/Contrato";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
+// Área Técnica
+import TecnicoDashboard from "./pages/tecnico/TecnicoDashboard";
+import OrdemServico from "./pages/tecnico/OrdemServico";
+import AssinaturaDigital from "./pages/tecnico/AssinaturaDigital";
+import TecnicoRotas from "./pages/tecnico/TecnicoRotas";
+
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -44,6 +50,8 @@ const App = () => {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            
+            {/* Área do Cliente */}
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
             <Route path="/treinamentos" element={<ProtectedRoute><Treinamentos /></ProtectedRoute>} />
             <Route path="/treinamentos/agendar" element={<ProtectedRoute><Treinamentos /></ProtectedRoute>} />
@@ -58,6 +66,13 @@ const App = () => {
             <Route path="/perfil/notificacoes" element={<ProtectedRoute><Perfil /></ProtectedRoute>} />
             <Route path="/perfil/configuracoes" element={<ProtectedRoute><Perfil /></ProtectedRoute>} />
             <Route path="/ajuda" element={<ProtectedRoute><Perfil /></ProtectedRoute>} />
+            
+            {/* Área Técnica */}
+            <Route path="/tecnico" element={<ProtectedRoute><TecnicoDashboard /></ProtectedRoute>} />
+            <Route path="/tecnico/rotas" element={<ProtectedRoute><TecnicoRotas /></ProtectedRoute>} />
+            <Route path="/tecnico/ordem/:id" element={<ProtectedRoute><OrdemServico /></ProtectedRoute>} />
+            <Route path="/tecnico/ordem/:id/assinatura" element={<ProtectedRoute><AssinaturaDigital /></ProtectedRoute>} />
+            
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

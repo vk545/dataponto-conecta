@@ -8,6 +8,7 @@ interface PageHeaderProps {
   title: string;
   subtitle?: string;
   showBack?: boolean;
+  backTo?: string;
   showNotifications?: boolean;
   notificationCount?: number;
   rightAction?: ReactNode;
@@ -18,23 +19,33 @@ export function PageHeader({
   title, 
   subtitle,
   showBack = false, 
+  backTo,
   showNotifications = false,
   notificationCount = 0,
   rightAction,
   className
 }: PageHeaderProps) {
   const navigate = useNavigate();
+  const hasBackButton = showBack || backTo;
+
+  const handleBack = () => {
+    if (backTo) {
+      navigate(backTo);
+    } else {
+      navigate(-1);
+    }
+  };
 
   return (
     <header className={cn("sticky top-0 z-40 glass-effect border-b border-border", className)}>
       <div className="flex items-center justify-between h-16 px-4">
         <div className="flex items-center gap-3">
-          {showBack && (
+          {hasBackButton && (
             <Button 
               variant="ghost" 
               size="icon" 
               className="h-9 w-9 rounded-xl"
-              onClick={() => navigate(-1)}
+              onClick={handleBack}
             >
               <ChevronLeft className="h-5 w-5" />
             </Button>
