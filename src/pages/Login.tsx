@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Eye, EyeOff, LogIn } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Eye, EyeOff, LogIn, Wrench, Building2 } from "lucide-react";
 import logo from "@/assets/logo-dataponto.png";
 
 export default function Login() {
@@ -13,6 +14,7 @@ export default function Login() {
   const [password, setPassword] = useState("demo123");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [loginType, setLoginType] = useState<"cliente" | "tecnico">("cliente");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,7 +23,13 @@ export default function Login() {
     // Simula login para demonstração
     setTimeout(() => {
       localStorage.setItem("dataponto_auth", "true");
-      navigate("/");
+      localStorage.setItem("dataponto_user_type", loginType);
+      
+      if (loginType === "tecnico") {
+        navigate("/tecnico");
+      } else {
+        navigate("/");
+      }
     }, 800);
   };
 
@@ -48,6 +56,20 @@ export default function Login() {
             </p>
           </CardHeader>
           <CardContent>
+            {/* Login Type Tabs */}
+            <Tabs value={loginType} onValueChange={(v) => setLoginType(v as "cliente" | "tecnico")} className="mb-4">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="cliente" className="gap-2">
+                  <Building2 className="h-4 w-4" />
+                  Cliente
+                </TabsTrigger>
+                <TabsTrigger value="tecnico" className="gap-2">
+                  <Wrench className="h-4 w-4" />
+                  Técnico
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">E-mail</Label>
@@ -104,8 +126,13 @@ export default function Login() {
             {/* Demo hint */}
             <div className="mt-4 p-3 bg-muted/50 rounded-lg">
               <p className="text-xs text-center text-muted-foreground">
-                <strong>Demonstração:</strong> Clique em "Entrar" para acessar
+                <strong>Demonstração:</strong> Selecione o tipo de acesso e clique em "Entrar"
               </p>
+              {loginType === "tecnico" && (
+                <p className="text-xs text-center text-primary mt-1">
+                  Você acessará a área técnica
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
