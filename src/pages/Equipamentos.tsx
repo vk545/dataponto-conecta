@@ -12,6 +12,10 @@ import {
   AlertTriangle
 } from "lucide-react";
 
+import relogioPonto from "@/assets/relogio-ponto.png";
+import controladorBiometrico from "@/assets/controlador-biometrico.png";
+import catraca from "@/assets/catraca.png";
+
 interface Equipment {
   id: string;
   name: string;
@@ -26,29 +30,29 @@ interface Equipment {
 const mockEquipments: Equipment[] = [
   {
     id: "1",
-    name: "Leitor Biométrico",
-    model: "Bio Pro X1",
-    serial: "BP-2024-001",
-    image: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=300&h=200&fit=crop",
+    name: "Relógio de Ponto",
+    model: "iDFace Max - Control iD",
+    serial: "RP-2024-001",
+    image: relogioPonto,
     status: "active",
     lastMaintenance: new Date(2025, 10, 15),
-    openTickets: 1,
+    openTickets: 0,
   },
   {
     id: "2",
-    name: "Relógio de Ponto",
-    model: "DP-500",
-    serial: "DP-2024-002",
-    image: "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=300&h=200&fit=crop",
+    name: "Controlador Biométrico",
+    model: "iDAccess - Control iD",
+    serial: "CB-2024-002",
+    image: controladorBiometrico,
     status: "maintenance",
     openTickets: 1,
   },
   {
     id: "3",
     name: "Catraca de Acesso",
-    model: "CA-200",
+    model: "iDBlock - Topdata",
     serial: "CA-2024-003",
-    image: "https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=300&h=200&fit=crop",
+    image: catraca,
     status: "active",
     lastMaintenance: new Date(2025, 11, 20),
     openTickets: 0,

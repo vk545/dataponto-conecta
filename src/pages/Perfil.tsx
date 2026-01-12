@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { 
   User,
   Building2,
@@ -62,6 +62,13 @@ const supportItems = [
 ];
 
 export default function Perfil() {
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    localStorage.removeItem("dataponto_auth");
+    navigate("/login");
+  };
+
   return (
     <MobileLayout>
       <PageHeader title="Perfil" />
@@ -142,7 +149,11 @@ export default function Perfil() {
         </Card>
 
         {/* Logout Button */}
-        <Button variant="outline" className="w-full gap-2 text-destructive hover:text-destructive hover:bg-destructive-light">
+        <Button 
+          variant="outline" 
+          className="w-full gap-2 text-destructive hover:text-destructive hover:bg-destructive-light"
+          onClick={handleLogout}
+        >
           <LogOut className="h-4 w-4" />
           Sair da Conta
         </Button>
