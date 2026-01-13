@@ -14,7 +14,9 @@ import {
   Phone,
   Building2,
   ChevronRight,
-  Wrench
+  Wrench,
+  MessageCircle,
+  Route
 } from "lucide-react";
 
 interface ServiceOrder {
@@ -140,6 +142,22 @@ export default function TecnicoDashboard() {
             <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
               <User className="h-6 w-6" />
             </div>
+          </Link>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="flex gap-2 mt-4">
+          <Link to="/tecnico/rotas" className="flex-1">
+            <Button variant="secondary" className="w-full gap-2 bg-white/20 hover:bg-white/30 text-white border-0">
+              <Route className="h-4 w-4" />
+              Rotas
+            </Button>
+          </Link>
+          <Link to="/tecnico/chat" className="flex-1">
+            <Button variant="secondary" className="w-full gap-2 bg-white/20 hover:bg-white/30 text-white border-0">
+              <MessageCircle className="h-4 w-4" />
+              Chat Valdemar
+            </Button>
           </Link>
         </div>
 

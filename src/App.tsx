@@ -21,6 +21,7 @@ import OrdemServico from "./pages/tecnico/OrdemServico";
 import AssinaturaDigital from "./pages/tecnico/AssinaturaDigital";
 import TecnicoRotas from "./pages/tecnico/TecnicoRotas";
 import TecnicoPerfil from "./pages/tecnico/TecnicoPeril";
+import TecnicoChat from "./pages/tecnico/TecnicoChat";
 
 const queryClient = new QueryClient();
 
@@ -74,6 +75,7 @@ const App = () => {
             <Route path="/tecnico/ordem/:id" element={<ProtectedRoute><OrdemServico /></ProtectedRoute>} />
             <Route path="/tecnico/ordem/:id/assinatura" element={<ProtectedRoute><AssinaturaDigital /></ProtectedRoute>} />
             <Route path="/tecnico/perfil" element={<ProtectedRoute><TecnicoPerfil /></ProtectedRoute>} />
+            <Route path="/tecnico/chat" element={<ProtectedRoute><TecnicoChat /></ProtectedRoute>} />
             
             <Route path="*" element={<NotFound />} />
           </Routes>
