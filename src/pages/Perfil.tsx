@@ -56,7 +56,7 @@ const supportItems = [
     icon: MessageCircle,
     label: "Falar com Suporte",
     action: () => {
-      window.open("https://wa.me/5511999999999?text=Olá! Preciso de suporte.", "_blank");
+      window.open("https://wa.me/5511988520276?text=Olá! Preciso de suporte.", "_blank");
     },
   },
 ];

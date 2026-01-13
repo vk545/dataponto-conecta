@@ -136,7 +136,7 @@ export default function TecnicoDashboard() {
             <h1 className="text-xl font-bold">{technician.name}</h1>
             <p className="text-xs opacity-70">{technician.id}</p>
           </div>
-          <Link to="/perfil">
+          <Link to="/tecnico/perfil">
             <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
               <User className="h-6 w-6" />
             </div>
@@ -218,7 +218,14 @@ export default function TecnicoDashboard() {
                     Abrir Checklist
                   </Button>
                 </Link>
-                <Button variant="outline" size="icon">
+                <Button 
+                  variant="outline" 
+                  size="icon"
+                  onClick={() => {
+                    const address = encodeURIComponent(currentOrder.clientAddress);
+                    window.open(`https://www.google.com/maps/dir/?api=1&destination=${address}`, '_blank');
+                  }}
+                >
                   <Navigation className="h-4 w-4" />
                 </Button>
               </div>
