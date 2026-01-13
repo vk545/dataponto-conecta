@@ -19,7 +19,7 @@ const mockUser = {
 };
 
 const mockContract = {
-  planName: "Plano Empresarial",
+  planName: "Plano Prime",
   status: "active" as const,
   services: ["Ponto Eletrônico", "Controle de Acesso", "Suporte 24h"],
 };

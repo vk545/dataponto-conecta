@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import {
   MapPin,
   Navigation,
@@ -11,10 +12,10 @@ import {
   CheckCircle2,
   User,
   Phone,
-  Building2,
   Route,
   Play,
-  ChevronRight
+  ChevronRight,
+  ExternalLink
 } from "lucide-react";
 
 interface RouteStop {
@@ -116,6 +117,27 @@ const statusConfig = {
 export default function TecnicoRotas() {
   const completedStops = mockRouteStops.filter(s => s.status === "completed").length;
   const totalStops = mockRouteStops.length;
+
+  const openGoogleMaps = (address: string) => {
+    const encodedAddress = encodeURIComponent(address);
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodedAddress}`, '_blank');
+    toast.success("Abrindo navegação no Google Maps");
+  };
+
+  const openWaze = (address: string) => {
+    const encodedAddress = encodeURIComponent(address);
+    window.open(`https://waze.com/ul?q=${encodedAddress}&navigate=yes`, '_blank');
+    toast.success("Abrindo navegação no Waze");
+  };
+
+  const handleStartRoute = (stop: RouteStop) => {
+    toast.success(`Iniciando rota para ${stop.clientName}`);
+    openGoogleMaps(stop.clientAddress);
+  };
+
+  const handleArrived = (stop: RouteStop) => {
+    toast.success(`Chegada registrada em ${stop.clientName}`);
+  };
 
   return (
     <MobileLayout showBottomNav={false}>
@@ -224,19 +246,41 @@ export default function TecnicoRotas() {
 
                       <div className="flex gap-2">
                         {stop.status === "pending" && (
-                          <Button size="sm" variant="outline" className="flex-1 gap-1">
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="flex-1 gap-1"
+                            onClick={() => handleStartRoute(stop)}
+                          >
                             <Play className="h-3 w-3" />
                             Iniciar Rota
                           </Button>
                         )}
                         {stop.status === "in_route" && (
                           <>
-                            <Button size="sm" className="flex-1 gap-1">
+                            <Button 
+                              size="sm" 
+                              className="flex-1 gap-1"
+                              onClick={() => handleArrived(stop)}
+                            >
                               <MapPin className="h-3 w-3" />
                               Cheguei
                             </Button>
-                            <Button size="sm" variant="outline">
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => openGoogleMaps(stop.clientAddress)}
+                              title="Abrir no Google Maps"
+                            >
                               <Navigation className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => openWaze(stop.clientAddress)}
+                              title="Abrir no Waze"
+                            >
+                              <ExternalLink className="h-4 w-4" />
                             </Button>
                           </>
                         )}

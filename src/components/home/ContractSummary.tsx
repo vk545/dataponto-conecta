@@ -18,7 +18,7 @@ export function ContractSummary({ planName, status, services }: ContractSummaryP
   const statusInfo = statusLabels[status];
 
   const handleWhatsApp = () => {
-    window.open("https://wa.me/5511999999999?text=Olá! Gostaria de saber mais sobre upgrade de plano.", "_blank");
+    window.open("https://wa.me/5511988520276?text=Olá! Gostaria de saber mais sobre upgrade de plano.", "_blank");
   };
 
   return (

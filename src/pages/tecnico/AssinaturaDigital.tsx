@@ -18,8 +18,9 @@ import {
   Wrench,
   Calendar,
   User,
-  Mail,
-  Download
+  Download,
+  PartyPopper,
+  Navigation
 } from "lucide-react";
 
 // Mock order data
@@ -36,6 +37,13 @@ const mockOrder = {
   time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
 };
 
+// Mock remaining clients
+const remainingClients = [
+  { name: "Indústria XYZ S.A.", time: "10:30" },
+  { name: "Comércio Delta", time: "14:00" },
+  { name: "Hotel Premium", time: "16:30" },
+];
+
 export default function AssinaturaDigital() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -46,6 +54,7 @@ export default function AssinaturaDigital() {
   const [signerEmail, setSignerEmail] = useState("");
   const [sendEmail, setSendEmail] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const getContext = () => {
     const canvas = canvasRef.current;
@@ -125,12 +134,28 @@ export default function AssinaturaDigital() {
 
     // Simula envio
     setTimeout(() => {
-      toast.success("Ordem de serviço finalizada com sucesso!");
+      setIsSubmitting(false);
+      setShowSuccessModal(true);
+      
       if (sendEmail && signerEmail) {
         toast.success(`Relatório enviado para ${signerEmail}`);
       }
-      navigate("/tecnico");
     }, 1500);
+  };
+
+  const handleContinue = () => {
+    setShowSuccessModal(false);
+    navigate("/tecnico");
+  };
+
+  const navigateToNextClient = () => {
+    if (remainingClients.length > 0) {
+      const nextClient = remainingClients[0];
+      const address = encodeURIComponent(`${nextClient.name}, São Paulo, SP`);
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${address}`, '_blank');
+    }
+    setShowSuccessModal(false);
+    navigate("/tecnico");
   };
 
   return (
@@ -322,6 +347,79 @@ export default function AssinaturaDigital() {
           </Button>
         )}
       </div>
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+          <div className="bg-background rounded-2xl w-full max-w-sm overflow-hidden animate-scale-in">
+            {/* Success Header */}
+            <div className="bg-success p-6 text-center">
+              <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-3">
+                <PartyPopper className="h-10 w-10 text-success" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">Serviço Finalizado!</h2>
+              <p className="text-white/80 text-sm mt-1">
+                Chamado {mockOrder.ticketNumber} concluído
+              </p>
+            </div>
+
+            {/* Next Client Info */}
+            <div className="p-6 space-y-4">
+              {remainingClients.length > 0 ? (
+                <>
+                  <div className="text-center">
+                    <p className="text-sm text-muted-foreground mb-1">Próximo cliente</p>
+                    <p className="font-semibold text-lg">{remainingClients[0].name}</p>
+                    <p className="text-sm text-muted-foreground">Horário: {remainingClients[0].time}</p>
+                  </div>
+
+                  <div className="bg-primary-light rounded-lg p-4 text-center">
+                    <p className="text-3xl font-bold text-primary">{remainingClients.length}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {remainingClients.length === 1 ? 'cliente restante' : 'clientes restantes'} hoje
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Button 
+                      className="w-full gap-2" 
+                      onClick={navigateToNextClient}
+                    >
+                      <Navigation className="h-4 w-4" />
+                      Ir para Próximo Cliente
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="w-full"
+                      onClick={handleContinue}
+                    >
+                      Voltar ao Dashboard
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-center py-4">
+                    <div className="w-16 h-16 bg-success-light rounded-full flex items-center justify-center mx-auto mb-3">
+                      <CheckCircle2 className="h-8 w-8 text-success" />
+                    </div>
+                    <h3 className="font-semibold text-lg mb-1">Parabéns!</h3>
+                    <p className="text-muted-foreground text-sm">
+                      Você finalizou todos os atendimentos do dia!
+                    </p>
+                  </div>
+                  <Button 
+                    className="w-full"
+                    onClick={handleContinue}
+                  >
+                    Voltar ao Dashboard
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </MobileLayout>
   );
 }

@@ -18,7 +18,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 const contractData = {
-  planName: "Plano Empresarial",
+  planName: "Plano Prime",
   status: "active",
   startDate: new Date(2024, 0, 1),
   renewalDate: new Date(2026, 0, 1),
@@ -40,7 +40,7 @@ const contractData = {
 
 export default function Contrato() {
   const handleWhatsApp = () => {
-    window.open("https://wa.me/5511999999999?text=Olá! Gostaria de falar sobre meu contrato ou fazer um upgrade de plano.", "_blank");
+    window.open("https://wa.me/5511988520276?text=Olá! Gostaria de falar sobre meu contrato ou fazer um upgrade de plano.", "_blank");
   };
 
   return (
