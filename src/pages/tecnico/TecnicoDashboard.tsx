@@ -1,8 +1,9 @@
+import { useState, useEffect } from "react";
 import { MobileLayout } from "@/components/layout/MobileLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { 
   ClipboardList, 
   MapPin, 
@@ -16,90 +17,37 @@ import {
   ChevronRight,
   Wrench,
   MessageCircle,
-  Route
+  Route,
+  Loader2
 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 
-interface ServiceOrder {
+interface Chamado {
   id: string;
-  ticketNumber: string;
-  clientName: string;
-  clientAddress: string;
-  clientPhone: string;
-  reason: string;
-  equipment: string;
-  status: "pending" | "in_route" | "in_progress" | "completed";
-  scheduledTime: string;
-  priority: "low" | "medium" | "high";
+  titulo: string;
+  descricao: string | null;
+  status: string;
+  prioridade: string | null;
+  data_agendada: string | null;
+  horario_agendado: string | null;
+  endereco: string | null;
+  created_at: string;
 }
 
-const mockOrders: ServiceOrder[] = [
-  {
-    id: "1",
-    ticketNumber: "CH-2025-001",
-    clientName: "Empresa ABC Ltda",
-    clientAddress: "Rua das Flores, 123 - Centro, São Paulo/SP",
-    clientPhone: "(11) 99999-1234",
-    reason: "Equipamento não liga",
-    equipment: "Relógio de Ponto - iDFace Max",
-    status: "in_progress",
-    scheduledTime: "08:00",
-    priority: "high",
-  },
-  {
-    id: "2",
-    ticketNumber: "CH-2025-002",
-    clientName: "Indústria XYZ S.A.",
-    clientAddress: "Av. Industrial, 456 - Distrito Industrial, São Paulo/SP",
-    clientPhone: "(11) 99888-5678",
-    reason: "Não está imprimindo",
-    equipment: "Relógio de Ponto - Rep Plus",
-    status: "pending",
-    scheduledTime: "10:30",
-    priority: "medium",
-  },
-  {
-    id: "3",
-    ticketNumber: "CH-2025-003",
-    clientName: "Comércio Delta",
-    clientAddress: "Rua do Comércio, 789 - Vila Nova, São Paulo/SP",
-    clientPhone: "(11) 97777-9012",
-    reason: "Leitor biométrico com falha",
-    equipment: "Controlador Biométrico - iDAccess",
-    status: "pending",
-    scheduledTime: "14:00",
-    priority: "low",
-  },
-  {
-    id: "4",
-    ticketNumber: "CH-2025-004",
-    clientName: "Hotel Premium",
-    clientAddress: "Av. Paulista, 1000 - Bela Vista, São Paulo/SP",
-    clientPhone: "(11) 96666-3456",
-    reason: "Catraca travada",
-    equipment: "Catraca de Acesso - iDBlock",
-    status: "completed",
-    scheduledTime: "16:30",
-    priority: "medium",
-  },
-];
-
 const statusConfig = {
-  pending: {
+  aberto: {
     label: "Pendente",
     icon: Clock,
     className: "bg-muted text-muted-foreground border-muted-foreground/20",
   },
-  in_route: {
-    label: "Em Rota",
-    icon: Navigation,
-    className: "bg-info-light text-info border-info/20",
-  },
-  in_progress: {
+  em_andamento: {
     label: "Em Andamento",
     icon: Wrench,
     className: "bg-warning-light text-warning border-warning/20",
   },
-  completed: {
+  finalizado: {
     label: "Finalizado",
     icon: CheckCircle2,
     className: "bg-success-light text-success border-success/20",
@@ -107,26 +55,116 @@ const statusConfig = {
 };
 
 const priorityConfig = {
-  low: { label: "Baixa", className: "bg-muted text-muted-foreground" },
-  medium: { label: "Média", className: "bg-warning-light text-warning" },
-  high: { label: "Alta", className: "bg-destructive-light text-destructive" },
+  baixa: { label: "Baixa", className: "bg-muted text-muted-foreground" },
+  normal: { label: "Normal", className: "bg-info-light text-info" },
+  alta: { label: "Alta", className: "bg-warning-light text-warning" },
+  urgente: { label: "Urgente", className: "bg-destructive-light text-destructive" },
 };
 
 export default function TecnicoDashboard() {
-  const technician = {
-    name: "João Silva",
-    id: "TEC-001",
+  const navigate = useNavigate();
+  const { profile } = useAuth();
+  const { toast } = useToast();
+  const [chamados, setChamados] = useState<Chamado[]>([]);
+  const [tecnicoId, setTecnicoId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (profile?.id) {
+      fetchTecnicoId();
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    if (tecnicoId) {
+      fetchChamados();
+      subscribeToChanges();
+    }
+  }, [tecnicoId]);
+
+  const fetchTecnicoId = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("tecnicos")
+        .select("id")
+        .eq("profile_id", profile?.id)
+        .single();
+
+      if (error) {
+        console.log("Técnico não encontrado, pode ser novo cadastro");
+        setLoading(false);
+        return;
+      }
+
+      setTecnicoId(data.id);
+    } catch (error) {
+      console.error("Erro ao buscar técnico:", error);
+      setLoading(false);
+    }
+  };
+
+  const fetchChamados = async () => {
+    if (!tecnicoId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("chamados_internos")
+        .select("*")
+        .eq("tecnico_id", tecnicoId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      setChamados(data || []);
+    } catch (error) {
+      console.error("Erro ao buscar chamados:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const subscribeToChanges = () => {
+    const channel = supabase
+      .channel("chamados-tecnico")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "chamados_internos",
+          filter: `tecnico_id=eq.${tecnicoId}`,
+        },
+        () => {
+          fetchChamados();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   };
 
   const stats = {
-    total: mockOrders.length,
-    pending: mockOrders.filter(o => o.status === "pending").length,
-    inProgress: mockOrders.filter(o => o.status === "in_progress").length,
-    completed: mockOrders.filter(o => o.status === "completed").length,
+    total: chamados.length,
+    pending: chamados.filter(o => o.status === "aberto").length,
+    inProgress: chamados.filter(o => o.status === "em_andamento").length,
+    completed: chamados.filter(o => o.status === "finalizado").length,
   };
 
-  const currentOrder = mockOrders.find(o => o.status === "in_progress");
-  const nextOrders = mockOrders.filter(o => o.status === "pending" || o.status === "in_route");
+  const currentOrder = chamados.find(o => o.status === "em_andamento");
+  const nextOrders = chamados.filter(o => o.status === "aberto");
+  const completedOrders = chamados.filter(o => o.status === "finalizado");
+
+  if (loading) {
+    return (
+      <MobileLayout showBottomNav={false}>
+        <div className="flex items-center justify-center min-h-screen">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </MobileLayout>
+    );
+  }
 
   return (
     <MobileLayout showBottomNav={false}>
@@ -135,8 +173,8 @@ export default function TecnicoDashboard() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-sm opacity-80">Área Técnica</p>
-            <h1 className="text-xl font-bold">{technician.name}</h1>
-            <p className="text-xs opacity-70">{technician.id}</p>
+            <h1 className="text-xl font-bold">{profile?.nome || "Técnico"}</h1>
+            <p className="text-xs opacity-70">Técnico de Campo</p>
           </div>
           <Link to="/tecnico/perfil">
             <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
@@ -162,7 +200,7 @@ export default function TecnicoDashboard() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-4 gap-2 mt-4">
           <div className="bg-white/10 rounded-lg p-2 text-center">
             <p className="text-lg font-bold">{stats.total}</p>
             <p className="text-xs opacity-80">Total</p>
@@ -183,110 +221,117 @@ export default function TecnicoDashboard() {
       </div>
 
       <div className="p-4 space-y-4">
-        {/* Current Order */}
-        {currentOrder && (
-          <Card className="border-primary border-2">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5 text-primary" />
-                  Atendimento Atual
-                </CardTitle>
-                <Badge className={priorityConfig[currentOrder.priority].className}>
-                  {priorityConfig[currentOrder.priority].label}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-sm font-medium">{currentOrder.ticketNumber}</span>
-                <Badge className={statusConfig[currentOrder.status].className}>
-                  {statusConfig[currentOrder.status].label}
-                </Badge>
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex items-start gap-2">
-                  <Building2 className="h-4 w-4 text-muted-foreground mt-0.5" />
-                  <div>
-                    <p className="font-medium text-sm">{currentOrder.clientName}</p>
-                    <p className="text-xs text-muted-foreground">{currentOrder.equipment}</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-start gap-2">
-                  <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
-                  <p className="text-xs text-muted-foreground">{currentOrder.clientAddress}</p>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <Phone className="h-4 w-4 text-muted-foreground" />
-                  <p className="text-xs text-muted-foreground">{currentOrder.clientPhone}</p>
-                </div>
-              </div>
-
-              <div className="p-2 bg-destructive-light rounded-lg">
-                <p className="text-xs font-medium text-destructive">Motivo: {currentOrder.reason}</p>
-              </div>
-
-              <div className="flex gap-2">
-                <Link to={`/tecnico/ordem/${currentOrder.id}`} className="flex-1">
-                  <Button className="w-full gap-2">
-                    <ClipboardList className="h-4 w-4" />
-                    Abrir Checklist
-                  </Button>
-                </Link>
-                <Button 
-                  variant="outline" 
-                  size="icon"
-                  onClick={() => {
-                    const address = encodeURIComponent(currentOrder.clientAddress);
-                    window.open(`https://www.google.com/maps/dir/?api=1&destination=${address}`, '_blank');
-                  }}
-                >
-                  <Navigation className="h-4 w-4" />
-                </Button>
-              </div>
+        {chamados.length === 0 ? (
+          <Card className="shadow-card">
+            <CardContent className="p-6 text-center">
+              <ClipboardList className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+              <p className="text-sm font-medium">Nenhum chamado atribuído</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Aguarde o coordenador atribuir chamados para você.
+              </p>
             </CardContent>
           </Card>
+        ) : (
+          <>
+            {/* Current Order */}
+            {currentOrder && (
+              <Card className="border-primary border-2">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <AlertCircle className="h-5 w-5 text-primary" />
+                      Atendimento Atual
+                    </CardTitle>
+                    <Badge className={priorityConfig[currentOrder.prioridade as keyof typeof priorityConfig]?.className || priorityConfig.normal.className}>
+                      {priorityConfig[currentOrder.prioridade as keyof typeof priorityConfig]?.label || "Normal"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-sm">{currentOrder.titulo}</span>
+                    <Badge className={statusConfig.em_andamento.className}>
+                      {statusConfig.em_andamento.label}
+                    </Badge>
+                  </div>
+                  
+                  {currentOrder.descricao && (
+                    <p className="text-xs text-muted-foreground">{currentOrder.descricao}</p>
+                  )}
+
+                  {currentOrder.endereco && (
+                    <div className="flex items-start gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+                      <p className="text-xs text-muted-foreground">{currentOrder.endereco}</p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <Link to={`/tecnico/ordem/${currentOrder.id}`} className="flex-1">
+                      <Button className="w-full gap-2">
+                        <ClipboardList className="h-4 w-4" />
+                        Abrir Checklist
+                      </Button>
+                    </Link>
+                    {currentOrder.endereco && (
+                      <Button 
+                        variant="outline" 
+                        size="icon"
+                        onClick={() => {
+                          const address = encodeURIComponent(currentOrder.endereco || "");
+                          window.open(`https://www.google.com/maps/dir/?api=1&destination=${address}`, '_blank');
+                        }}
+                      >
+                        <Navigation className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Next Orders */}
+            {nextOrders.length > 0 && (
+              <div>
+                <h2 className="font-semibold mb-3 flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-muted-foreground" />
+                  Próximos Atendimentos
+                </h2>
+                
+                <div className="space-y-3">
+                  {nextOrders.map((order) => (
+                    <OrderCard key={order.id} order={order} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Completed Today */}
+            {completedOrders.length > 0 && (
+              <div>
+                <h2 className="font-semibold mb-3 flex items-center gap-2">
+                  <CheckCircle2 className="h-5 w-5 text-success" />
+                  Finalizados
+                </h2>
+                
+                <div className="space-y-3">
+                  {completedOrders.slice(0, 3).map((order) => (
+                    <OrderCard key={order.id} order={order} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
-
-        {/* Next Orders */}
-        <div>
-          <h2 className="font-semibold mb-3 flex items-center gap-2">
-            <Clock className="h-5 w-5 text-muted-foreground" />
-            Próximos Atendimentos
-          </h2>
-          
-          <div className="space-y-3">
-            {nextOrders.map((order) => (
-              <OrderCard key={order.id} order={order} />
-            ))}
-          </div>
-        </div>
-
-        {/* Completed Today */}
-        <div>
-          <h2 className="font-semibold mb-3 flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-success" />
-            Finalizados Hoje
-          </h2>
-          
-          <div className="space-y-3">
-            {mockOrders.filter(o => o.status === "completed").map((order) => (
-              <OrderCard key={order.id} order={order} />
-            ))}
-          </div>
-        </div>
       </div>
     </MobileLayout>
   );
 }
 
-function OrderCard({ order }: { order: ServiceOrder }) {
-  const config = statusConfig[order.status];
+function OrderCard({ order }: { order: Chamado }) {
+  const config = statusConfig[order.status as keyof typeof statusConfig] || statusConfig.aberto;
   const StatusIcon = config.icon;
-  const priorityConf = priorityConfig[order.priority];
+  const priorityConf = priorityConfig[order.prioridade as keyof typeof priorityConfig] || priorityConfig.normal;
 
   return (
     <Link to={`/tecnico/ordem/${order.id}`}>
@@ -302,15 +347,23 @@ function OrderCard({ order }: { order: ServiceOrder }) {
                 {priorityConf.label}
               </Badge>
             </div>
-            <span className="text-xs text-muted-foreground">{order.scheduledTime}</span>
+            {order.horario_agendado && (
+              <span className="text-xs text-muted-foreground">{order.horario_agendado}</span>
+            )}
           </div>
 
           <div className="flex items-start justify-between">
             <div className="space-y-1">
-              <p className="font-mono text-xs text-muted-foreground">{order.ticketNumber}</p>
-              <p className="font-medium text-sm">{order.clientName}</p>
-              <p className="text-xs text-muted-foreground">{order.equipment}</p>
-              <p className="text-xs text-destructive font-medium">{order.reason}</p>
+              <p className="font-medium text-sm">{order.titulo}</p>
+              {order.descricao && (
+                <p className="text-xs text-muted-foreground line-clamp-1">{order.descricao}</p>
+              )}
+              {order.endereco && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MapPin className="h-3 w-3" />
+                  <span className="truncate">{order.endereco}</span>
+                </p>
+              )}
             </div>
             <ChevronRight className="h-5 w-5 text-muted-foreground" />
           </div>
