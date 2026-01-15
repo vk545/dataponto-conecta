@@ -6,7 +6,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useNavigate } from "react-router-dom";
-import { 
+import { useAuth } from "@/contexts/AuthContext";
+import {
   User,
   Phone,
   Mail,
@@ -40,10 +41,11 @@ const technicianData = {
 
 export default function TecnicoPerfil() {
   const navigate = useNavigate();
+  const { signOut, profile } = useAuth();
 
-  const handleLogout = () => {
-    localStorage.removeItem("dataponto_auth");
-    navigate("/login");
+  const handleLogout = async () => {
+    await signOut();
+    navigate("/auth");
   };
 
   return (
