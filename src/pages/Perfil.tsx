@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Link, useNavigate } from "react-router-dom";
-import { 
+import { useAuth } from "@/contexts/AuthContext";
+import {
   User,
   Building2,
   FileCheck,
@@ -63,10 +64,11 @@ const supportItems = [
 
 export default function Perfil() {
   const navigate = useNavigate();
+  const { signOut, profile } = useAuth();
 
-  const handleLogout = () => {
-    localStorage.removeItem("dataponto_auth");
-    navigate("/login");
+  const handleLogout = async () => {
+    await signOut();
+    navigate("/auth");
   };
 
   return (
