@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Send, Mic, Square, Play, Pause, Headphones } from "lucide-react";
+import { Send, Mic, Square, Play, Pause, Headphones, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -33,6 +33,7 @@ export default function CoordenadorChat() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -40,53 +41,96 @@ export default function CoordenadorChat() {
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (tecnicoId) {
+    if (tecnicoId && profile?.id) {
       fetchTecnicoInfo();
       fetchMessages();
-      subscribeToMessages();
+      const unsubscribe = subscribeToMessages();
+      return () => {
+        unsubscribe();
+      };
     }
-  }, [tecnicoId]);
+  }, [tecnicoId, profile?.id]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
   const fetchTecnicoInfo = async () => {
-    // Mock for now
-    setTecnicoNome("Carlos Silva");
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("nome")
+        .eq("id", tecnicoId)
+        .single();
+
+      if (error) throw error;
+      setTecnicoNome(data?.nome || "Técnico");
+    } catch (error) {
+      console.error("Erro ao buscar técnico:", error);
+    }
   };
 
   const fetchMessages = async () => {
     if (!profile?.id || !tecnicoId) return;
     
-    // Mock messages for now
-    setMessages([
-      {
-        id: "1",
-        sender_id: tecnicoId,
-        receiver_id: profile.id,
-        content: "Bom dia Valdemar! Estou chegando no primeiro cliente.",
-        audio_url: null,
-        is_audio: false,
-        created_at: new Date(Date.now() - 3600000).toISOString(),
-        lida: true,
-      },
-      {
-        id: "2",
-        sender_id: profile.id,
-        receiver_id: tecnicoId,
-        content: "Bom dia! Perfeito, me avise quando finalizar.",
-        audio_url: null,
-        is_audio: false,
-        created_at: new Date(Date.now() - 3500000).toISOString(),
-        lida: true,
-      },
-    ]);
-    setLoading(false);
+    try {
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${tecnicoId}),and(sender_id.eq.${tecnicoId},receiver_id.eq.${profile.id})`)
+        .order("created_at", { ascending: true });
+
+      if (error) throw error;
+      setMessages(data || []);
+
+      // Marcar mensagens como lidas
+      await supabase
+        .from("chat_messages")
+        .update({ lida: true })
+        .eq("receiver_id", profile.id)
+        .eq("sender_id", tecnicoId);
+
+    } catch (error) {
+      console.error("Erro ao buscar mensagens:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const subscribeToMessages = () => {
-    // Will implement realtime subscription
+    const channel = supabase
+      .channel("chat-messages-coord")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "chat_messages",
+        },
+        (payload) => {
+          const newMsg = payload.new as Message;
+          // Verificar se a mensagem é relevante para este chat
+          if (
+            (newMsg.sender_id === profile?.id && newMsg.receiver_id === tecnicoId) ||
+            (newMsg.sender_id === tecnicoId && newMsg.receiver_id === profile?.id)
+          ) {
+            setMessages(prev => [...prev, newMsg]);
+            
+            // Marcar como lida se for mensagem recebida
+            if (newMsg.receiver_id === profile?.id) {
+              supabase
+                .from("chat_messages")
+                .update({ lida: true })
+                .eq("id", newMsg.id);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   };
 
   const scrollToBottom = () => {
@@ -94,42 +138,32 @@ export default function CoordenadorChat() {
   };
 
   const sendTextMessage = async () => {
-    if (!newMessage.trim() || !profile?.id || !tecnicoId) return;
+    if (!newMessage.trim() || !profile?.id || !tecnicoId || sending) return;
 
-    const message: Message = {
-      id: Date.now().toString(),
-      sender_id: profile.id,
-      receiver_id: tecnicoId,
-      content: newMessage.trim(),
-      audio_url: null,
-      is_audio: false,
-      created_at: new Date().toISOString(),
-      lida: false,
-    };
-
-    setMessages(prev => [...prev, message]);
+    setSending(true);
+    const messageContent = newMessage.trim();
     setNewMessage("");
 
-    // Simular resposta
-    setTimeout(() => {
-      const responses = [
-        "Entendido! Vou verificar.",
-        "Ok, já estou resolvendo.",
-        "Certo, obrigado pela informação!",
-      ];
-      const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-      
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        sender_id: tecnicoId,
-        receiver_id: profile.id,
-        content: randomResponse,
-        audio_url: null,
+    try {
+      const { error } = await supabase.from("chat_messages").insert({
+        sender_id: profile.id,
+        receiver_id: tecnicoId,
+        content: messageContent,
         is_audio: false,
-        created_at: new Date().toISOString(),
-        lida: false,
-      }]);
-    }, 2000);
+      });
+
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Erro ao enviar mensagem:", error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível enviar a mensagem",
+        variant: "destructive",
+      });
+      setNewMessage(messageContent);
+    } finally {
+      setSending(false);
+    }
   };
 
   const startRecording = async () => {
@@ -143,30 +177,15 @@ export default function CoordenadorChat() {
         audioChunksRef.current.push(event.data);
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        
-        if (profile?.id && tecnicoId) {
-          const message: Message = {
-            id: Date.now().toString(),
-            sender_id: profile.id,
-            receiver_id: tecnicoId,
-            content: null,
-            audio_url: audioUrl,
-            is_audio: true,
-            created_at: new Date().toISOString(),
-            lida: false,
-          };
-
-          setMessages(prev => [...prev, message]);
-        }
-        
         stream.getTracks().forEach(track => track.stop());
         
+        // Por enquanto, apenas simular envio de áudio
+        // TODO: Fazer upload para Supabase Storage
         toast({
-          title: "Áudio enviado",
-          description: "Seu áudio foi enviado com sucesso!",
+          title: "Áudio gravado",
+          description: "Funcionalidade de áudio em desenvolvimento.",
         });
       };
 
@@ -224,6 +243,16 @@ export default function CoordenadorChat() {
 
   const isMine = (senderId: string) => senderId === profile?.id;
 
+  if (loading) {
+    return (
+      <MobileLayout showHeader={false} showBottomNav={false}>
+        <div className="flex items-center justify-center min-h-screen">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </MobileLayout>
+    );
+  }
+
   return (
     <MobileLayout showHeader={false} showBottomNav={false}>
       <div className="flex flex-col h-screen">
@@ -248,54 +277,60 @@ export default function CoordenadorChat() {
 
         {/* Área de mensagens */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-muted/30">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${isMine(message.sender_id) ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                className={`max-w-[80%] rounded-2xl px-4 py-2 ${
-                  isMine(message.sender_id)
-                    ? "bg-primary text-primary-foreground rounded-br-md"
-                    : "bg-card border rounded-bl-md"
-                }`}
-              >
-                {message.is_audio && message.audio_url ? (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={`h-8 w-8 rounded-full ${
-                        isMine(message.sender_id) 
-                          ? "hover:bg-primary-foreground/20" 
-                          : "hover:bg-muted"
-                      }`}
-                      onClick={() => playAudio(message.audio_url!, message.id)}
-                    >
-                      {playingAudioId === message.id ? (
-                        <Pause className="h-4 w-4" />
-                      ) : (
-                        <Play className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <div className="flex items-center gap-1">
-                      <Headphones className="h-3 w-3" />
-                      <span className="text-xs">Áudio</span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm">{message.content}</p>
-                )}
-                <p className={`text-[10px] mt-1 ${
-                  isMine(message.sender_id) 
-                    ? "text-primary-foreground/70" 
-                    : "text-muted-foreground"
-                }`}>
-                  {formatMessageTime(message.created_at)}
-                </p>
-              </div>
+          {messages.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-muted-foreground">
+              <p className="text-sm">Nenhuma mensagem ainda. Comece a conversa!</p>
             </div>
-          ))}
+          ) : (
+            messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex ${isMine(message.sender_id) ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[80%] rounded-2xl px-4 py-2 ${
+                    isMine(message.sender_id)
+                      ? "bg-primary text-primary-foreground rounded-br-md"
+                      : "bg-card border rounded-bl-md"
+                  }`}
+                >
+                  {message.is_audio && message.audio_url ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={`h-8 w-8 rounded-full ${
+                          isMine(message.sender_id) 
+                            ? "hover:bg-primary-foreground/20" 
+                            : "hover:bg-muted"
+                        }`}
+                        onClick={() => playAudio(message.audio_url!, message.id)}
+                      >
+                        {playingAudioId === message.id ? (
+                          <Pause className="h-4 w-4" />
+                        ) : (
+                          <Play className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Headphones className="h-3 w-3" />
+                        <span className="text-xs">Áudio</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm">{message.content}</p>
+                  )}
+                  <p className={`text-[10px] mt-1 ${
+                    isMine(message.sender_id) 
+                      ? "text-primary-foreground/70" 
+                      : "text-muted-foreground"
+                  }`}>
+                    {formatMessageTime(message.created_at)}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
           <div ref={messagesEndRef} />
         </div>
 
@@ -334,14 +369,19 @@ export default function CoordenadorChat() {
                 placeholder="Digite sua mensagem..."
                 className="flex-1 rounded-full"
                 onKeyDown={(e) => e.key === "Enter" && sendTextMessage()}
+                disabled={sending}
               />
               <Button
                 size="icon"
                 className="rounded-full h-10 w-10 shrink-0"
                 onClick={sendTextMessage}
-                disabled={!newMessage.trim()}
+                disabled={!newMessage.trim() || sending}
               >
-                <Send className="h-4 w-4" />
+                {sending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
               </Button>
             </div>
           )}
