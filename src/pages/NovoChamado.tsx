@@ -16,6 +16,8 @@ import {
 import { Camera, X, Upload, CheckCircle2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 const mockEquipments = [
   { id: "1", name: "Leitor Bio Pro X1", serial: "BP-2024-001" },
@@ -25,6 +27,7 @@ const mockEquipments = [
 
 export default function NovoChamado() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [photos, setPhotos] = useState<string[]>([]);
   const [formData, setFormData] = useState({
@@ -34,7 +37,7 @@ export default function NovoChamado() {
   });
 
   const handlePhotoAdd = () => {
-    // Simulating photo capture/upload
+    // Simulating photo capture/upload (UI only)
     const mockPhotos = [
       "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=200&h=200&fit=crop",
       "https://images.unsplash.com/photo-1518770660439-4636190af475?w=200&h=200&fit=crop",
@@ -50,17 +53,57 @@ export default function NovoChamado() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!profile?.id) {
+      toast({
+        title: "Erro",
+        description: "Você precisa estar logado para abrir um chamado.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      const selectedEquipment = mockEquipments.find((eq) => eq.id === formData.equipment);
+      const descricaoFinal = [
+        selectedEquipment
+          ? `Equipamento: ${selectedEquipment.name} (${selectedEquipment.serial})`
+          : null,
+        formData.description.trim() || null,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
 
-    toast({
-      title: "Chamado aberto com sucesso!",
-      description: "Você receberá atualizações sobre o status.",
-    });
+      const { error } = await supabase.from("chamados_internos").insert({
+        titulo: formData.title.trim(),
+        descricao: descricaoFinal || null,
+        endereco: null,
+        prioridade: "normal",
+        tecnico_id: null,
+        cliente_id: profile.id,
+        status: "aberto",
+      });
 
-    navigate("/chamados");
+      if (error) throw error;
+
+      toast({
+        title: "Chamado aberto com sucesso!",
+        description: "Você receberá atualizações sobre o status.",
+      });
+
+      navigate("/chamados");
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Erro ao abrir chamado",
+        description: err?.message || "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
