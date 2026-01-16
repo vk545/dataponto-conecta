@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { MobileLayout } from "@/components/layout/MobileLayout";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import {
   MapPin,
   Phone,
@@ -30,7 +31,8 @@ import {
   Sparkles,
   TestTube,
   MessageSquare,
-  ChevronRight
+  ChevronRight,
+  Loader2,
 } from "lucide-react";
 
 interface ChecklistItem {
@@ -53,31 +55,75 @@ const initialChecklist: ChecklistItem[] = [
   { id: "test", label: "Teste de Funcionalidade", icon: TestTube, checked: false, observation: "" },
 ];
 
-// Mock order data
-const mockOrder = {
-  id: "1",
-  ticketNumber: "CH-2025-001",
-  clientName: "Empresa ABC Ltda",
-  clientAddress: "Rua das Flores, 123 - Centro, São Paulo/SP",
-  clientPhone: "(11) 99999-1234",
-  clientEmail: "contato@empresaabc.com.br",
-  reason: "Equipamento não liga",
-  equipment: "Relógio de Ponto - iDFace Max",
-  serial: "RP-2024-001",
-  status: "in_progress",
-  scheduledTime: "08:00",
-  priority: "high",
-  technicianName: "João Silva",
-  technicianId: "TEC-001",
-};
+interface ChamadoData {
+  id: string;
+  titulo: string;
+  descricao: string | null;
+  endereco: string | null;
+  prioridade: string | null;
+  status: string;
+  data_agendada: string | null;
+  horario_agendado: string | null;
+  cliente?: {
+    nome: string;
+    email: string;
+    telefone: string | null;
+    empresa: string | null;
+  } | null;
+}
+
 
 export default function OrdemServico() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [chamado, setChamado] = useState<ChamadoData | null>(null);
   const [checklist, setChecklist] = useState<ChecklistItem[]>(initialChecklist);
   const [generalObservation, setGeneralObservation] = useState("");
   const [solution, setSolution] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
+
+  useEffect(() => {
+    const run = async () => {
+      if (!id) return;
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("chamados_internos")
+          .select(
+            `
+            id,
+            titulo,
+            descricao,
+            endereco,
+            prioridade,
+            status,
+            data_agendada,
+            horario_agendado,
+            cliente:cliente_id (
+              nome,
+              email,
+              telefone,
+              empresa
+            )
+          `
+          )
+          .eq("id", id)
+          .single();
+
+        if (error) throw error;
+        setChamado(data as any);
+      } catch (err: any) {
+        console.error(err);
+        toast.error("Não foi possível carregar este chamado.");
+        navigate("/tecnico");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    run();
+  }, [id, navigate]);
 
   const handleChecklistChange = (itemId: string, checked: boolean) => {
     setChecklist(prev => 
@@ -105,13 +151,23 @@ export default function OrdemServico() {
   const completedItems = checklist.filter(item => item.checked).length;
   const progress = Math.round((completedItems / checklist.length) * 100);
 
+  if (loading) {
+    return (
+      <MobileLayout showBottomNav={false}>
+        <div className="flex items-center justify-center min-h-screen">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </MobileLayout>
+    );
+  }
+
+  if (!chamado) return null;
+
+  const ticketNumber = `CH-${chamado.id.slice(0, 8).toUpperCase()}`;
+
   return (
     <MobileLayout showBottomNav={false}>
-      <PageHeader 
-        title="Ordem de Serviço" 
-        subtitle={mockOrder.ticketNumber}
-        backTo="/tecnico"
-      />
+      <PageHeader title="Ordem de Serviço" subtitle={ticketNumber} backTo="/tecnico" />
 
       <div className="p-4 space-y-4 pb-24">
         {/* Client Info */}
@@ -124,35 +180,50 @@ export default function OrdemServico() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
-              <p className="font-medium">{mockOrder.clientName}</p>
-              <p className="text-sm text-muted-foreground">{mockOrder.equipment}</p>
-              <p className="text-xs text-muted-foreground font-mono">S/N: {mockOrder.serial}</p>
+              <p className="font-medium">{chamado.cliente?.empresa || chamado.cliente?.nome || "Cliente"}</p>
+              <p className="text-sm text-muted-foreground">{chamado.titulo}</p>
+              <p className="text-xs text-muted-foreground font-mono">ID: {chamado.id.slice(0, 8).toUpperCase()}</p>
             </div>
-            
+
             <Separator />
-            
+
             <div className="flex items-start gap-2">
               <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
               <div className="flex-1">
-                <p className="text-sm">{mockOrder.clientAddress}</p>
+                <p className="text-sm">{chamado.endereco || "Endereço não informado"}</p>
               </div>
-              <Button variant="outline" size="icon" className="shrink-0">
-                <Navigation className="h-4 w-4" />
-              </Button>
+              {chamado.endereco && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  onClick={() => {
+                    const address = encodeURIComponent(chamado.endereco || "");
+                    window.open(`https://www.google.com/maps/dir/?api=1&destination=${address}`, "_blank");
+                  }}
+                >
+                  <Navigation className="h-4 w-4" />
+                </Button>
+              )}
             </div>
-            
-            <div className="flex items-center gap-2">
-              <Phone className="h-4 w-4 text-muted-foreground" />
-              <a href={`tel:${mockOrder.clientPhone}`} className="text-sm text-primary">
-                {mockOrder.clientPhone}
-              </a>
-            </div>
+
+            {chamado.cliente?.telefone && (
+              <div className="flex items-center gap-2">
+                <Phone className="h-4 w-4 text-muted-foreground" />
+                <a href={`tel:${chamado.cliente.telefone}`} className="text-sm text-primary">
+                  {chamado.cliente.telefone}
+                </a>
+              </div>
+            )}
 
             <div className="p-3 bg-destructive-light rounded-lg">
               <p className="text-sm font-medium text-destructive flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4" />
-                Motivo: {mockOrder.reason}
+                Motivo: {chamado.titulo}
               </p>
+              {chamado.descricao && (
+                <p className="text-xs text-destructive/90 mt-2 whitespace-pre-wrap">{chamado.descricao}</p>
+              )}
             </div>
           </CardContent>
         </Card>

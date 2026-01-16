@@ -12,6 +12,7 @@ import Treinamentos from "./pages/Treinamentos";
 import Financeiro from "./pages/Financeiro";
 import Chamados from "./pages/Chamados";
 import NovoChamado from "./pages/NovoChamado";
+import ChamadoDetalhe from "./pages/ChamadoDetalhe";
 import Equipamentos from "./pages/Equipamentos";
 import Perfil from "./pages/Perfil";
 import Contrato from "./pages/Contrato";
@@ -89,6 +90,7 @@ const AppRoutes = () => {
       <Route path="/financeiro" element={<ProtectedRoute><Financeiro /></ProtectedRoute>} />
       <Route path="/chamados" element={<ProtectedRoute><Chamados /></ProtectedRoute>} />
       <Route path="/chamados/novo" element={<ProtectedRoute><NovoChamado /></ProtectedRoute>} />
+      <Route path="/chamados/:id" element={<ProtectedRoute><ChamadoDetalhe /></ProtectedRoute>} />
       <Route path="/equipamentos" element={<ProtectedRoute><Equipamentos /></ProtectedRoute>} />
       <Route path="/perfil" element={<ProtectedRoute><Perfil /></ProtectedRoute>} />
       <Route path="/perfil/contrato" element={<ProtectedRoute><Contrato /></ProtectedRoute>} />
