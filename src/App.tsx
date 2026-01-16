@@ -30,6 +30,8 @@ import TecnicoChat from "./pages/tecnico/TecnicoChat";
 import CoordenadorDashboard from "./pages/coordenador/CoordenadorDashboard";
 import CoordenadorChat from "./pages/coordenador/CoordenadorChat";
 import GerenciarTreinamentos from "./pages/coordenador/GerenciarTreinamentos";
+import NovoChamadoCoordenador from "./pages/coordenador/NovoChamadoCoordenador";
+import DetalheChamado from "./pages/coordenador/DetalheChamado";
 
 const queryClient = new QueryClient();
 
@@ -101,9 +103,11 @@ const AppRoutes = () => {
       
       {/* Área Coordenador (Valdemar) */}
       <Route path="/coordenador" element={<ProtectedRoute><CoordenadorDashboard /></ProtectedRoute>} />
+      <Route path="/coordenador/chamados/novo" element={<ProtectedRoute><NovoChamadoCoordenador /></ProtectedRoute>} />
+      <Route path="/coordenador/chamados/:id" element={<ProtectedRoute><DetalheChamado /></ProtectedRoute>} />
       <Route path="/coordenador/chat/:tecnicoId" element={<ProtectedRoute><CoordenadorChat /></ProtectedRoute>} />
       <Route path="/coordenador/treinamentos" element={<ProtectedRoute><GerenciarTreinamentos /></ProtectedRoute>} />
-      
+
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
