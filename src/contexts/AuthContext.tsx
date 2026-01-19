@@ -12,6 +12,7 @@ interface Profile {
   avatar_url: string | null;
   empresa: string | null;
   cargo: string | null;
+  created_at: string | null;
 }
 
 interface AuthContextType {

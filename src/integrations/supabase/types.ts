@@ -179,6 +179,44 @@ export type Database = {
           },
         ]
       }
+      excecoes_horario_treinamento: {
+        Row: {
+          bloqueado: boolean | null
+          created_at: string | null
+          created_by: string | null
+          data: string
+          id: string
+          motivo: string | null
+          slots_personalizados: Json
+        }
+        Insert: {
+          bloqueado?: boolean | null
+          created_at?: string | null
+          created_by?: string | null
+          data: string
+          id?: string
+          motivo?: string | null
+          slots_personalizados?: Json
+        }
+        Update: {
+          bloqueado?: boolean | null
+          created_at?: string | null
+          created_by?: string | null
+          data?: string
+          id?: string
+          motivo?: string | null
+          slots_personalizados?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "excecoes_horario_treinamento_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -218,6 +256,33 @@ export type Database = {
           tipo?: Database["public"]["Enums"]["user_type"]
           updated_at?: string | null
           user_id?: string
+        }
+        Relationships: []
+      }
+      slots_treinamento: {
+        Row: {
+          ativo: boolean | null
+          created_at: string | null
+          descricao: string | null
+          horario_fim: string
+          horario_inicio: string
+          id: string
+        }
+        Insert: {
+          ativo?: boolean | null
+          created_at?: string | null
+          descricao?: string | null
+          horario_fim: string
+          horario_inicio: string
+          id?: string
+        }
+        Update: {
+          ativo?: boolean | null
+          created_at?: string | null
+          descricao?: string | null
+          horario_fim?: string
+          horario_inicio?: string
+          id?: string
         }
         Relationships: []
       }
