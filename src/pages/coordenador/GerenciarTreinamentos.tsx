@@ -5,44 +5,34 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
 import { 
   Plus, 
   Clock, 
   Users, 
-  Video, 
-  MapPin, 
   Trash2, 
   Settings,
   Calendar as CalendarIcon,
-  AlertCircle,
-  Loader2
+  Loader2,
+  User
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, isWeekend } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
 
 interface Treinamento {
   id: string;
   titulo: string;
   descricao: string | null;
-  tipo: "online" | "presencial";
   data: string;
   horario_inicio: string;
   horario_fim: string;
   vagas_totais: number;
   vagas_disponiveis: number;
-  link_online: string | null;
-  endereco: string | null;
-  instrutor: string | null;
   ativo: boolean;
 }
 
@@ -54,29 +44,33 @@ interface Slot {
   descricao: string | null;
 }
 
+interface Agendamento {
+  id: string;
+  treinamento_id: string;
+  profile_id: string;
+  confirmado: boolean;
+  presente: boolean | null;
+  profile?: {
+    nome: string;
+    email: string;
+    empresa: string | null;
+  };
+}
+
 const MAX_TREINAMENTOS_POR_DIA = 3;
+const DEFAULT_VAGAS = 10;
 
 export default function GerenciarTreinamentos() {
   const { toast } = useToast();
-  const { profile } = useAuth();
   const [treinamentos, setTreinamentos] = useState<Treinamento[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [slotsDialogOpen, setSlotsDialogOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [agendamentosDialogOpen, setAgendamentosDialogOpen] = useState(false);
+  const [selectedTreinamento, setSelectedTreinamento] = useState<Treinamento | null>(null);
   const [calendarDate, setCalendarDate] = useState<Date>(new Date());
   
-  // Form state
-  const [titulo, setTitulo] = useState("");
-  const [descricao, setDescricao] = useState("");
-  const [tipo, setTipo] = useState<"online" | "presencial">("online");
-  const [selectedSlot, setSelectedSlot] = useState<string>("");
-  const [vagasTotais, setVagasTotais] = useState("10");
-  const [linkOnline, setLinkOnline] = useState("");
-  const [endereco, setEndereco] = useState("");
-  const [instrutor, setInstrutor] = useState("");
-
   // Slots form
   const [novoSlotInicio, setNovoSlotInicio] = useState("09:00");
   const [novoSlotFim, setNovoSlotFim] = useState("11:00");
@@ -90,7 +84,7 @@ export default function GerenciarTreinamentos() {
     try {
       const [treinamentosRes, slotsRes] = await Promise.all([
         supabase.from("treinamentos").select("*").order("data", { ascending: true }),
-        supabase.from("slots_treinamento").select("*").eq("ativo", true).order("horario_inicio")
+        supabase.from("slots_treinamento").select("*").order("horario_inicio")
       ]);
 
       if (treinamentosRes.error) throw treinamentosRes.error;
@@ -105,96 +99,44 @@ export default function GerenciarTreinamentos() {
     }
   };
 
-  const getTreinamentosPorData = (data: string) => {
-    return treinamentos.filter(t => t.data === data);
-  };
-
-  const getSlotsDisponiveis = (data: string) => {
-    const treinamentosDoDia = getTreinamentosPorData(data);
-    const horariosUsados = treinamentosDoDia.map(t => t.horario_inicio);
-    
-    return slots.filter(slot => !horariosUsados.includes(slot.horario_inicio));
-  };
-
-  const handleCreateTreinamento = async () => {
-    if (!titulo || !selectedDate || !selectedSlot) {
-      toast({
-        title: "Campos obrigatórios",
-        description: "Preencha o título, data e horário.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const dataStr = format(selectedDate, "yyyy-MM-dd");
-    const treinamentosDoDia = getTreinamentosPorData(dataStr);
-
-    if (treinamentosDoDia.length >= MAX_TREINAMENTOS_POR_DIA) {
-      toast({
-        title: "Limite atingido",
-        description: `Máximo de ${MAX_TREINAMENTOS_POR_DIA} treinamentos por dia.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const slot = slots.find(s => s.id === selectedSlot);
-    if (!slot) return;
-
+  const fetchAgendamentos = async (treinamentoId: string) => {
     try {
-      const novoTreinamento = {
-        titulo,
-        descricao: descricao || null,
-        tipo,
-        data: dataStr,
-        horario_inicio: slot.horario_inicio,
-        horario_fim: slot.horario_fim,
-        vagas_totais: parseInt(vagasTotais),
-        vagas_disponiveis: parseInt(vagasTotais),
-        link_online: tipo === "online" ? linkOnline : null,
-        endereco: tipo === "presencial" ? endereco : null,
-        instrutor: instrutor || null,
-        ativo: true,
-        created_by: profile?.id,
-      };
-
       const { data, error } = await supabase
-        .from("treinamentos")
-        .insert(novoTreinamento)
-        .select()
-        .single();
+        .from("agendamentos_treinamento")
+        .select(`
+          id,
+          treinamento_id,
+          profile_id,
+          confirmado,
+          presente,
+          profiles:profile_id (
+            nome,
+            email,
+            empresa
+          )
+        `)
+        .eq("treinamento_id", treinamentoId);
 
       if (error) throw error;
-
-      setTreinamentos(prev => [...prev, data as Treinamento]);
       
-      toast({
-        title: "Treinamento criado!",
-        description: "O treinamento foi adicionado com sucesso.",
-      });
-
-      resetForm();
-      setDialogOpen(false);
+      // Transform data to match interface
+      const transformedData = (data || []).map((item: any) => ({
+        id: item.id,
+        treinamento_id: item.treinamento_id,
+        profile_id: item.profile_id,
+        confirmado: item.confirmado,
+        presente: item.presente,
+        profile: item.profiles
+      }));
       
+      setAgendamentos(transformedData);
     } catch (error) {
-      console.error("Erro ao criar treinamento:", error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível criar o treinamento.",
-        variant: "destructive",
-      });
+      console.error("Erro ao buscar agendamentos:", error);
     }
   };
 
-  const resetForm = () => {
-    setTitulo("");
-    setDescricao("");
-    setTipo("online");
-    setSelectedSlot("");
-    setVagasTotais("10");
-    setLinkOnline("");
-    setEndereco("");
-    setInstrutor("");
+  const getTreinamentosPorData = (data: string) => {
+    return treinamentos.filter(t => t.data === data && t.ativo);
   };
 
   const handleDeleteTreinamento = async (id: string) => {
@@ -236,8 +178,8 @@ export default function GerenciarTreinamentos() {
       const { data, error } = await supabase
         .from("slots_treinamento")
         .insert({
-          horario_inicio: novoSlotInicio,
-          horario_fim: novoSlotFim,
+          horario_inicio: novoSlotInicio + ":00",
+          horario_fim: novoSlotFim + ":00",
           descricao: novoSlotDescricao || null,
           ativo: true,
         })
@@ -274,20 +216,7 @@ export default function GerenciarTreinamentos() {
 
       if (error) throw error;
 
-      if (ativo) {
-        // Reativar - buscar o slot novamente
-        const { data } = await supabase
-          .from("slots_treinamento")
-          .select("*")
-          .eq("id", slotId)
-          .single();
-        
-        if (data) {
-          setSlots(prev => [...prev, data as Slot]);
-        }
-      } else {
-        setSlots(prev => prev.filter(s => s.id !== slotId));
-      }
+      setSlots(prev => prev.map(s => s.id === slotId ? { ...s, ativo } : s));
 
       toast({
         title: ativo ? "Horário ativado" : "Horário desativado",
@@ -313,6 +242,33 @@ export default function GerenciarTreinamentos() {
       });
     } catch (error) {
       console.error("Erro ao remover slot:", error);
+    }
+  };
+
+  const handleViewAgendamentos = (treinamento: Treinamento) => {
+    setSelectedTreinamento(treinamento);
+    fetchAgendamentos(treinamento.id);
+    setAgendamentosDialogOpen(true);
+  };
+
+  const handleTogglePresenca = async (agendamentoId: string, presente: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("agendamentos_treinamento")
+        .update({ presente })
+        .eq("id", agendamentoId);
+
+      if (error) throw error;
+
+      setAgendamentos(prev => 
+        prev.map(a => a.id === agendamentoId ? { ...a, presente } : a)
+      );
+
+      toast({
+        title: presente ? "Presença confirmada" : "Presença removida",
+      });
+    } catch (error) {
+      console.error("Erro ao atualizar presença:", error);
     }
   };
 
@@ -346,12 +302,23 @@ export default function GerenciarTreinamentos() {
 
       <div className="p-4 space-y-4">
         <Tabs defaultValue="calendario" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="calendario">Calendário</TabsTrigger>
-            <TabsTrigger value="lista">Lista</TabsTrigger>
+            <TabsTrigger value="lista">Agendados</TabsTrigger>
+            <TabsTrigger value="config">Horários</TabsTrigger>
           </TabsList>
 
           <TabsContent value="calendario" className="space-y-4 mt-4">
+            {/* Info */}
+            <Card className="shadow-card bg-primary/5 border-primary/20">
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">
+                  Os clientes podem agendar treinamentos em qualquer dia útil. 
+                  Aqui você vê os treinamentos que foram agendados.
+                </p>
+              </CardContent>
+            </Card>
+
             {/* Calendar View */}
             <Card className="shadow-card">
               <CardContent className="p-3">
@@ -361,6 +328,7 @@ export default function GerenciarTreinamentos() {
                   onSelect={(date) => date && setCalendarDate(date)}
                   locale={ptBR}
                   className="w-full"
+                  disabled={(date) => isWeekend(date)}
                   modifiers={{
                     hasTraining: (date) => trainingDates.includes(format(date, "yyyy-MM-dd")),
                     isFull: (date) => datasLotadas.includes(format(date, "yyyy-MM-dd")),
@@ -384,32 +352,44 @@ export default function GerenciarTreinamentos() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="font-medium text-sm">
-                  {format(calendarDate, "d 'de' MMMM", { locale: ptBR })}
+                  {format(calendarDate, "EEEE, d 'de' MMMM", { locale: ptBR })}
                 </h3>
-                <Badge variant="outline" className="text-xs">
-                  {getTreinamentosPorData(format(calendarDate, "yyyy-MM-dd")).length}/{MAX_TREINAMENTOS_POR_DIA}
-                </Badge>
+                {!isWeekend(calendarDate) && (
+                  <Badge variant="outline" className="text-xs">
+                    {getTreinamentosPorData(format(calendarDate, "yyyy-MM-dd")).length} agendamento(s)
+                  </Badge>
+                )}
               </div>
-              
-              {getTreinamentosPorData(format(calendarDate, "yyyy-MM-dd")).map((treinamento) => (
-                <TreinamentoCard 
-                  key={treinamento.id} 
-                  treinamento={treinamento} 
-                  onDelete={handleDeleteTreinamento}
-                />
-              ))}
 
-              {getTreinamentosPorData(format(calendarDate, "yyyy-MM-dd")).length === 0 && (
+              {isWeekend(calendarDate) ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  Nenhum treinamento neste dia
+                  Não há treinamentos aos fins de semana
                 </p>
+              ) : (
+                <>
+                  {getTreinamentosPorData(format(calendarDate, "yyyy-MM-dd")).map((treinamento) => (
+                    <TreinamentoCard 
+                      key={treinamento.id} 
+                      treinamento={treinamento} 
+                      onDelete={handleDeleteTreinamento}
+                      onViewAgendamentos={() => handleViewAgendamentos(treinamento)}
+                    />
+                  ))}
+
+                  {getTreinamentosPorData(format(calendarDate, "yyyy-MM-dd")).length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      Nenhum treinamento agendado para este dia
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </TabsContent>
 
           <TabsContent value="lista" className="space-y-4 mt-4">
-            {/* Lista de Treinamentos */}
+            {/* Lista de todos os treinamentos agendados */}
             {Object.entries(treinamentosPorData)
+              .filter(([data]) => new Date(data + "T00:00:00") >= new Date())
               .sort(([a], [b]) => a.localeCompare(b))
               .map(([data, lista]) => (
                 <div key={data} className="space-y-2">
@@ -417,7 +397,7 @@ export default function GerenciarTreinamentos() {
                     <CalendarIcon className="h-4 w-4 text-primary" />
                     {format(new Date(data + "T00:00:00"), "EEEE, d 'de' MMMM", { locale: ptBR })}
                     <Badge variant="outline" className="text-xs ml-auto">
-                      {lista.length}/{MAX_TREINAMENTOS_POR_DIA}
+                      {lista.length} treinamento(s)
                     </Badge>
                   </h3>
                   
@@ -426,215 +406,88 @@ export default function GerenciarTreinamentos() {
                       key={treinamento.id} 
                       treinamento={treinamento} 
                       onDelete={handleDeleteTreinamento}
+                      onViewAgendamentos={() => handleViewAgendamentos(treinamento)}
                     />
                   ))}
                 </div>
               ))}
 
-            {treinamentos.length === 0 && (
+            {treinamentos.filter(t => new Date(t.data + "T00:00:00") >= new Date()).length === 0 && (
               <Card className="shadow-card">
                 <CardContent className="p-6 text-center">
                   <CalendarIcon className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
                   <p className="text-sm text-muted-foreground">
-                    Nenhum treinamento cadastrado
+                    Nenhum treinamento agendado pelos clientes
                   </p>
                 </CardContent>
               </Card>
             )}
           </TabsContent>
-        </Tabs>
 
-        {/* Botões de ação */}
-        <div className="flex gap-2">
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="flex-1">
-                <Plus className="h-4 w-4 mr-2" />
-                Novo Treinamento
-              </Button>
-            </DialogTrigger>
-            
-            <DialogContent className="max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Criar Treinamento</DialogTitle>
-              </DialogHeader>
-              
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label>Título *</Label>
-                  <Input
-                    placeholder="Ex: Sistema de Ponto Eletrônico"
-                    value={titulo}
-                    onChange={(e) => setTitulo(e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Descrição</Label>
-                  <Textarea
-                    placeholder="Descrição do treinamento..."
-                    value={descricao}
-                    onChange={(e) => setDescricao(e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Tipo</Label>
-                  <Select value={tipo} onValueChange={(v) => setTipo(v as typeof tipo)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="online">Online</SelectItem>
-                      <SelectItem value="presencial">Presencial</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Data *</Label>
-                  <div className="border rounded-lg p-2">
-                    <Calendar
-                      mode="single"
-                      selected={selectedDate}
-                      onSelect={(date) => {
-                        if (date) {
-                          setSelectedDate(date);
-                          setSelectedSlot("");
-                        }
-                      }}
-                      locale={ptBR}
-                      className="w-full"
-                      disabled={(date) => {
-                        const dateStr = format(date, "yyyy-MM-dd");
-                        return datasLotadas.includes(dateStr);
-                      }}
-                    />
-                  </div>
-                  {datasLotadas.includes(format(selectedDate, "yyyy-MM-dd")) && (
-                    <p className="text-xs text-warning flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" />
-                      Este dia já atingiu o limite de treinamentos
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Horário *</Label>
-                  <Select value={selectedSlot} onValueChange={setSelectedSlot}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione um horário" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {getSlotsDisponiveis(format(selectedDate, "yyyy-MM-dd")).map((slot) => (
-                        <SelectItem key={slot.id} value={slot.id}>
-                          {slot.horario_inicio.substring(0, 5)} - {slot.horario_fim.substring(0, 5)}
-                          {slot.descricao && ` (${slot.descricao})`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {getSlotsDisponiveis(format(selectedDate, "yyyy-MM-dd")).length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      Todos os horários já estão ocupados nesta data
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Vagas</Label>
-                  <Input
-                    type="number"
-                    value={vagasTotais}
-                    onChange={(e) => setVagasTotais(e.target.value)}
-                    min="1"
-                  />
-                </div>
-
-                {tipo === "online" && (
-                  <div className="space-y-2">
-                    <Label>Link da reunião</Label>
-                    <Input
-                      placeholder="https://meet.google.com/..."
-                      value={linkOnline}
-                      onChange={(e) => setLinkOnline(e.target.value)}
-                    />
-                  </div>
-                )}
-
-                {tipo === "presencial" && (
-                  <div className="space-y-2">
-                    <Label>Endereço</Label>
-                    <Input
-                      placeholder="Rua, número, cidade"
-                      value={endereco}
-                      onChange={(e) => setEndereco(e.target.value)}
-                    />
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label>Instrutor</Label>
-                  <Input
-                    placeholder="Nome do instrutor"
-                    value={instrutor}
-                    onChange={(e) => setInstrutor(e.target.value)}
-                  />
-                </div>
-
-                <Button className="w-full" onClick={handleCreateTreinamento}>
-                  Criar Treinamento
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog open={slotsDialogOpen} onOpenChange={setSlotsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="icon">
-                <Settings className="h-4 w-4" />
-              </Button>
-            </DialogTrigger>
-            
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Configurar Horários</DialogTitle>
-              </DialogHeader>
-              
-              <div className="space-y-4 py-4">
+          <TabsContent value="config" className="space-y-4 mt-4">
+            {/* Configuração de Horários */}
+            <Card className="shadow-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  Horários Disponíveis
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Configure os horários disponíveis para treinamentos.
-                  Máximo de {MAX_TREINAMENTOS_POR_DIA} treinamentos por dia.
+                  Configure os horários em que os clientes podem agendar treinamentos.
                 </p>
 
-                {/* Lista de slots */}
+                {/* Slots existentes */}
                 <div className="space-y-2">
-                  {slots.map((slot) => (
-                    <div key={slot.id} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div>
-                        <p className="font-medium text-sm">
-                          {slot.horario_inicio.substring(0, 5)} - {slot.horario_fim.substring(0, 5)}
-                        </p>
-                        {slot.descricao && (
-                          <p className="text-xs text-muted-foreground">{slot.descricao}</p>
-                        )}
+                  {slots.map(slot => (
+                    <div key={slot.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <Clock className="h-4 w-4 text-primary" />
+                        <div>
+                          <span className="font-medium text-sm">
+                            {slot.horario_inicio.substring(0, 5)} - {slot.horario_fim.substring(0, 5)}
+                          </span>
+                          {slot.descricao && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              ({slot.descricao})
+                            </span>
+                          )}
+                        </div>
+                        <Badge variant={slot.ativo ? "default" : "secondary"} className="text-xs">
+                          {slot.ativo ? "Ativo" : "Inativo"}
+                        </Badge>
                       </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-destructive"
-                        onClick={() => handleDeleteSlot(slot.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => handleToggleSlot(slot.id, !slot.ativo)}
+                        >
+                          {slot.ativo ? "Desativar" : "Ativar"}
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => handleDeleteSlot(slot.id)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
+
+                  {slots.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      Nenhum horário configurado. Adicione horários abaixo.
+                    </p>
+                  )}
                 </div>
 
                 {/* Adicionar novo slot */}
                 <div className="border-t pt-4 space-y-3">
-                  <Label>Adicionar novo horário</Label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <Label className="text-sm font-medium">Adicionar Novo Horário</Label>
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label className="text-xs">Início</Label>
                       <Input
@@ -652,21 +505,81 @@ export default function GerenciarTreinamentos() {
                       />
                     </div>
                   </div>
-                  <Input
-                    placeholder="Descrição (opcional)"
-                    value={novoSlotDescricao}
-                    onChange={(e) => setNovoSlotDescricao(e.target.value)}
-                  />
-                  <Button className="w-full" onClick={handleAddSlot}>
+                  <div>
+                    <Label className="text-xs">Descrição (opcional)</Label>
+                    <Input
+                      placeholder="Ex: Manhã, Tarde..."
+                      value={novoSlotDescricao}
+                      onChange={(e) => setNovoSlotDescricao(e.target.value)}
+                    />
+                  </div>
+                  <Button onClick={handleAddSlot} className="w-full">
                     <Plus className="h-4 w-4 mr-2" />
                     Adicionar Horário
                   </Button>
                 </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
+
+      {/* Dialog de Agendamentos */}
+      <Dialog open={agendamentosDialogOpen} onOpenChange={setAgendamentosDialogOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Participantes</DialogTitle>
+          </DialogHeader>
+          
+          {selectedTreinamento && (
+            <div className="space-y-4">
+              <div className="p-3 bg-muted/50 rounded-lg">
+                <p className="font-medium text-sm">{selectedTreinamento.titulo}</p>
+                <p className="text-xs text-muted-foreground">
+                  {format(new Date(selectedTreinamento.data + "T00:00:00"), "dd/MM/yyyy")} às {selectedTreinamento.horario_inicio.substring(0, 5)}
+                </p>
+                <div className="flex items-center gap-1 mt-2">
+                  <Users className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">
+                    {selectedTreinamento.vagas_totais - selectedTreinamento.vagas_disponiveis} de {selectedTreinamento.vagas_totais} vagas preenchidas
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {agendamentos.length > 0 ? (
+                  agendamentos.map(agendamento => (
+                    <div key={agendamento.id} className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                          <User className="h-4 w-4 text-primary" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-sm">{agendamento.profile?.nome}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {agendamento.profile?.empresa || agendamento.profile?.email}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant={agendamento.presente ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handleTogglePresenca(agendamento.id, !agendamento.presente)}
+                      >
+                        {agendamento.presente ? "Presente" : "Marcar presença"}
+                      </Button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Nenhum participante agendado
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </MobileLayout>
   );
 }
@@ -674,30 +587,17 @@ export default function GerenciarTreinamentos() {
 interface TreinamentoCardProps {
   treinamento: Treinamento;
   onDelete: (id: string) => void;
+  onViewAgendamentos: () => void;
 }
 
-function TreinamentoCard({ treinamento, onDelete }: TreinamentoCardProps) {
+function TreinamentoCard({ treinamento, onDelete, onViewAgendamentos }: TreinamentoCardProps) {
+  const vagasPreenchidas = treinamento.vagas_totais - treinamento.vagas_disponiveis;
+
   return (
     <Card className="shadow-card">
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <Badge variant="outline" className="text-xs">
-                {treinamento.tipo === "online" ? (
-                  <>
-                    <Video className="h-3 w-3 mr-1" />
-                    Online
-                  </>
-                ) : (
-                  <>
-                    <MapPin className="h-3 w-3 mr-1" />
-                    Presencial
-                  </>
-                )}
-              </Badge>
-            </div>
-            
             <h4 className="font-medium text-sm">{treinamento.titulo}</h4>
             
             <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
@@ -707,25 +607,19 @@ function TreinamentoCard({ treinamento, onDelete }: TreinamentoCardProps) {
               </span>
               <span className="flex items-center gap-1">
                 <Users className="h-3 w-3" />
-                {treinamento.vagas_disponiveis}/{treinamento.vagas_totais} vagas
+                {vagasPreenchidas}/{treinamento.vagas_totais}
               </span>
             </div>
-            
-            {treinamento.instrutor && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Instrutor: {treinamento.instrutor}
-              </p>
-            )}
           </div>
 
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8 text-destructive hover:text-destructive"
-            onClick={() => onDelete(treinamento.id)}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" onClick={onViewAgendamentos}>
+              <Users className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => onDelete(treinamento.id)}>
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

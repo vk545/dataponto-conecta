@@ -5,26 +5,29 @@ import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock, Users, Video, MapPin, CheckCircle2, Loader2 } from "lucide-react";
-import { format } from "date-fns";
+import { Clock, Users, CheckCircle2, Loader2 } from "lucide-react";
+import { format, addDays, isWeekend, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
-interface Training {
+interface Slot {
+  id: string;
+  horario_inicio: string;
+  horario_fim: string;
+  descricao: string | null;
+}
+
+interface Treinamento {
   id: string;
   titulo: string;
   data: string;
   horario_inicio: string;
   horario_fim: string;
-  tipo: "online" | "presencial";
   vagas_disponiveis: number;
   vagas_totais: number;
-  endereco: string | null;
-  link_online: string | null;
   descricao: string | null;
-  instrutor: string | null;
 }
 
 interface Agendamento {
@@ -32,57 +35,88 @@ interface Agendamento {
   confirmado: boolean;
 }
 
+// Slots padrão caso não tenha no banco
+const DEFAULT_SLOTS: Omit<Slot, "id">[] = [
+  { horario_inicio: "09:00:00", horario_fim: "11:00:00", descricao: "Manhã" },
+  { horario_inicio: "14:00:00", horario_fim: "16:00:00", descricao: "Tarde" },
+];
+
+const MAX_VAGAS_POR_SLOT = 10;
+
 export default function Treinamentos() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [trainings, setTrainings] = useState<Training[]>([]);
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [treinamentos, setTreinamentos] = useState<Treinamento[]>([]);
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchTrainings();
-    if (profile) {
-      fetchAgendamentos();
-    }
+    fetchData();
   }, [profile]);
 
-  const fetchTrainings = async () => {
+  const fetchData = async () => {
     try {
-      const { data, error } = await supabase
+      // Buscar slots configurados
+      const { data: slotsData } = await supabase
+        .from("slots_treinamento")
+        .select("*")
+        .eq("ativo", true)
+        .order("horario_inicio");
+
+      // Buscar treinamentos existentes
+      const { data: treinamentosData } = await supabase
         .from("treinamentos")
         .select("*")
         .eq("ativo", true)
         .gte("data", format(new Date(), "yyyy-MM-dd"))
         .order("data", { ascending: true });
 
-      if (error) throw error;
-      setTrainings(data || []);
+      // Buscar agendamentos do usuário
+      if (profile) {
+        const { data: agendamentosData } = await supabase
+          .from("agendamentos_treinamento")
+          .select("treinamento_id, confirmado")
+          .eq("profile_id", profile.id);
+
+        setAgendamentos(agendamentosData || []);
+      }
+
+      setSlots(slotsData || []);
+      setTreinamentos(treinamentosData || []);
     } catch (error) {
-      console.error("Erro ao buscar treinamentos:", error);
+      console.error("Erro ao buscar dados:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchAgendamentos = async () => {
-    if (!profile) return;
+  // Gera slots virtuais para uma data (dias úteis apenas)
+  const getSlotsParaData = (date: Date) => {
+    if (isWeekend(date)) return [];
+    
+    const dateStr = format(date, "yyyy-MM-dd");
+    const activeSlots = slots.length > 0 ? slots : DEFAULT_SLOTS.map((s, i) => ({ ...s, id: `default-${i}` }));
+    
+    return activeSlots.map(slot => {
+      // Verifica se já existe um treinamento para este slot nesta data
+      const treinamentoExistente = treinamentos.find(
+        t => t.data === dateStr && t.horario_inicio === slot.horario_inicio
+      );
 
-    try {
-      const { data, error } = await supabase
-        .from("agendamentos_treinamento")
-        .select("treinamento_id, confirmado")
-        .eq("profile_id", profile.id);
-
-      if (error) throw error;
-      setAgendamentos(data || []);
-    } catch (error) {
-      console.error("Erro ao buscar agendamentos:", error);
-    }
+      return {
+        ...slot,
+        dateStr,
+        treinamento: treinamentoExistente,
+        vagasDisponiveis: treinamentoExistente?.vagas_disponiveis ?? MAX_VAGAS_POR_SLOT,
+        vagasTotais: treinamentoExistente?.vagas_totais ?? MAX_VAGAS_POR_SLOT,
+      };
+    });
   };
 
-  const handleAgendar = async (treinamentoId: string) => {
+  const handleAgendar = async (slot: ReturnType<typeof getSlotsParaData>[0]) => {
     if (!profile) {
       toast({
         title: "Erro",
@@ -92,9 +126,65 @@ export default function Treinamentos() {
       return;
     }
 
-    setBooking(treinamentoId);
+    if (slot.vagasDisponiveis <= 0) {
+      toast({
+        title: "Sem vagas",
+        description: "Este horário já está lotado.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const bookingKey = `${slot.dateStr}-${slot.horario_inicio}`;
+    setBooking(bookingKey);
+
     try {
-      const { error } = await supabase
+      let treinamentoId = slot.treinamento?.id;
+
+      // Se não existe treinamento, cria um automaticamente
+      if (!treinamentoId) {
+        const { data: novoTreinamento, error: createError } = await supabase
+          .from("treinamentos")
+          .insert({
+            titulo: `Treinamento ${slot.descricao || ""}`.trim(),
+            data: slot.dateStr,
+            horario_inicio: slot.horario_inicio,
+            horario_fim: slot.horario_fim,
+            tipo: "presencial",
+            vagas_totais: MAX_VAGAS_POR_SLOT,
+            vagas_disponiveis: MAX_VAGAS_POR_SLOT - 1, // Já desconta a vaga atual
+            ativo: true,
+            created_by: profile.id,
+          })
+          .select()
+          .single();
+
+        if (createError) throw createError;
+        treinamentoId = novoTreinamento.id;
+
+        // Adiciona à lista local
+        setTreinamentos(prev => [...prev, novoTreinamento as Treinamento]);
+      } else {
+        // Atualiza vagas do treinamento existente
+        const { error: updateError } = await supabase
+          .from("treinamentos")
+          .update({ vagas_disponiveis: slot.vagasDisponiveis - 1 })
+          .eq("id", treinamentoId);
+
+        if (updateError) throw updateError;
+
+        // Atualiza local
+        setTreinamentos(prev =>
+          prev.map(t =>
+            t.id === treinamentoId
+              ? { ...t, vagas_disponiveis: t.vagas_disponiveis - 1 }
+              : t
+          )
+        );
+      }
+
+      // Cria o agendamento
+      const { error: agendamentoError } = await supabase
         .from("agendamentos_treinamento")
         .insert({
           treinamento_id: treinamentoId,
@@ -102,24 +192,15 @@ export default function Treinamentos() {
           confirmado: true,
         });
 
-      if (error) throw error;
+      if (agendamentoError) throw agendamentoError;
+
+      setAgendamentos(prev => [...prev, { treinamento_id: treinamentoId!, confirmado: true }]);
 
       toast({
         title: "Agendado com sucesso!",
-        description: "Você receberá os detalhes por email.",
+        description: `Treinamento em ${format(new Date(slot.dateStr), "dd/MM")} às ${slot.horario_inicio.substring(0, 5)}`,
       });
 
-      // Atualizar lista local
-      setAgendamentos((prev) => [...prev, { treinamento_id: treinamentoId, confirmado: true }]);
-      
-      // Atualizar vagas disponíveis
-      setTrainings((prev) =>
-        prev.map((t) =>
-          t.id === treinamentoId
-            ? { ...t, vagas_disponiveis: t.vagas_disponiveis - 1 }
-            : t
-        )
-      );
     } catch (error: any) {
       console.error("Erro ao agendar:", error);
       toast({
@@ -132,28 +213,31 @@ export default function Treinamentos() {
     }
   };
 
-  const trainingDates = trainings.map((t) => new Date(t.data + "T00:00:00").toDateString());
-  
-  const selectedTrainings = trainings.filter(
-    (t) => new Date(t.data + "T00:00:00").toDateString() === selectedDate?.toDateString()
-  );
-
-  const upcomingTrainings = trainings
-    .filter(
-      (t) =>
-        new Date(t.data + "T00:00:00") >= new Date() &&
-        !selectedTrainings.includes(t)
-    )
-    .slice(0, 3);
-
-  const isAgendado = (treinamentoId: string) => {
-    return agendamentos.some((a) => a.treinamento_id === treinamentoId);
+  const isAgendado = (treinamentoId: string | undefined) => {
+    if (!treinamentoId) return false;
+    return agendamentos.some(a => a.treinamento_id === treinamentoId);
   };
+
+  // Datas que têm treinamentos
+  const trainingDates = [...new Set(treinamentos.map(t => t.data))];
+
+  // Slots para a data selecionada
+  const selectedSlots = selectedDate ? getSlotsParaData(selectedDate) : [];
+
+  // Próximos 5 dias úteis com slots disponíveis
+  const proximosDiasUteis = [];
+  let checkDate = addDays(new Date(), 1);
+  while (proximosDiasUteis.length < 5) {
+    if (!isWeekend(checkDate)) {
+      proximosDiasUteis.push(new Date(checkDate));
+    }
+    checkDate = addDays(checkDate, 1);
+  }
 
   if (loading) {
     return (
       <MobileLayout>
-        <PageHeader title="Treinamentos" subtitle="Agende e gerencie seus treinamentos" />
+        <PageHeader title="Treinamentos" subtitle="Agende seu treinamento" />
         <div className="flex items-center justify-center p-8">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
@@ -163,9 +247,19 @@ export default function Treinamentos() {
 
   return (
     <MobileLayout>
-      <PageHeader title="Treinamentos" subtitle="Agende e gerencie seus treinamentos" />
+      <PageHeader title="Treinamentos" subtitle="Agende seu treinamento" />
 
       <div className="p-4 space-y-6">
+        {/* Info */}
+        <Card className="shadow-card bg-primary/5 border-primary/20">
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">
+              Escolha um dia útil (segunda a sexta) e um horário disponível para agendar seu treinamento. 
+              As vagas são limitadas - primeiro a agendar, garante a vaga!
+            </p>
+          </CardContent>
+        </Card>
+
         {/* Calendar */}
         <Card className="shadow-card">
           <CardContent className="p-3">
@@ -175,8 +269,9 @@ export default function Treinamentos() {
               onSelect={setSelectedDate}
               locale={ptBR}
               className="w-full"
+              disabled={(date) => isWeekend(date) || startOfDay(date) < startOfDay(new Date())}
               modifiers={{
-                hasTraining: (date) => trainingDates.includes(date.toDateString()),
+                hasTraining: (date) => trainingDates.includes(format(date, "yyyy-MM-dd")),
               }}
               modifiersStyles={{
                 hasTraining: { 
@@ -189,28 +284,28 @@ export default function Treinamentos() {
           </CardContent>
         </Card>
 
-        {/* Selected Date Trainings */}
-        {selectedDate && (
+        {/* Slots da data selecionada */}
+        {selectedDate && !isWeekend(selectedDate) && (
           <div className="space-y-3">
             <h2 className="font-medium text-sm px-1">
-              {format(selectedDate, "d 'de' MMMM", { locale: ptBR })}
+              Horários em {format(selectedDate, "d 'de' MMMM", { locale: ptBR })}
             </h2>
             
-            {selectedTrainings.length > 0 ? (
-              selectedTrainings.map((training) => (
-                <TrainingCard 
-                  key={training.id} 
-                  training={training} 
-                  confirmed={isAgendado(training.id)}
-                  onAgendar={handleAgendar}
-                  booking={booking === training.id}
+            {selectedSlots.length > 0 ? (
+              selectedSlots.map((slot) => (
+                <SlotCard
+                  key={`${slot.dateStr}-${slot.horario_inicio}`}
+                  slot={slot}
+                  confirmed={isAgendado(slot.treinamento?.id)}
+                  onAgendar={() => handleAgendar(slot)}
+                  booking={booking === `${slot.dateStr}-${slot.horario_inicio}`}
                 />
               ))
             ) : (
               <Card className="shadow-card">
                 <CardContent className="p-6 text-center">
                   <p className="text-sm text-muted-foreground">
-                    Nenhum treinamento nesta data
+                    Nenhum horário disponível neste dia
                   </p>
                 </CardContent>
               </Card>
@@ -218,103 +313,105 @@ export default function Treinamentos() {
           </div>
         )}
 
-        {/* Upcoming Trainings */}
-        {upcomingTrainings.length > 0 && (
-          <div className="space-y-3">
-            <h2 className="font-medium text-sm px-1">Próximos Treinamentos</h2>
-            {upcomingTrainings.map((training) => (
-              <TrainingCard 
-                key={training.id} 
-                training={training} 
-                compact 
-                confirmed={isAgendado(training.id)}
-                onAgendar={handleAgendar}
-                booking={booking === training.id}
-              />
-            ))}
-          </div>
-        )}
-
-        {trainings.length === 0 && (
+        {selectedDate && isWeekend(selectedDate) && (
           <Card className="shadow-card">
             <CardContent className="p-6 text-center">
               <p className="text-sm text-muted-foreground">
-                Nenhum treinamento disponível no momento
+                Não há treinamentos aos fins de semana
               </p>
             </CardContent>
           </Card>
+        )}
+
+        {/* Meus agendamentos */}
+        {agendamentos.length > 0 && (
+          <div className="space-y-3">
+            <h2 className="font-medium text-sm px-1">Meus Agendamentos</h2>
+            {treinamentos
+              .filter(t => agendamentos.some(a => a.treinamento_id === t.id))
+              .map(training => (
+                <Card key={training.id} className="shadow-card">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge variant="outline" className="bg-success-light text-success border-success/20 text-xs">
+                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                        Confirmado
+                      </Badge>
+                    </div>
+                    <h3 className="font-medium text-sm">{training.titulo}</h3>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {format(new Date(training.data + "T00:00:00"), "dd/MM/yyyy")}
+                      </span>
+                      <span>•</span>
+                      <span>{training.horario_inicio.substring(0, 5)} - {training.horario_fim.substring(0, 5)}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+          </div>
         )}
       </div>
     </MobileLayout>
   );
 }
 
-interface TrainingCardProps {
-  training: Training;
-  compact?: boolean;
-  confirmed?: boolean;
-  onAgendar: (id: string) => void;
-  booking?: boolean;
+interface SlotCardProps {
+  slot: {
+    horario_inicio: string;
+    horario_fim: string;
+    descricao: string | null;
+    vagasDisponiveis: number;
+    vagasTotais: number;
+    treinamento?: Treinamento;
+  };
+  confirmed: boolean;
+  onAgendar: () => void;
+  booking: boolean;
 }
 
-function TrainingCard({ training, compact = false, confirmed, onAgendar, booking }: TrainingCardProps) {
-  const spotsLeft = training.vagas_disponiveis;
-  const isAlmostFull = spotsLeft <= 3;
+function SlotCard({ slot, confirmed, onAgendar, booking }: SlotCardProps) {
+  const spotsLeft = slot.vagasDisponiveis;
+  const isAlmostFull = spotsLeft <= 3 && spotsLeft > 0;
   const isFull = spotsLeft <= 0;
 
   return (
     <Card className="shadow-card card-interactive">
-      <CardContent className={compact ? "p-3" : "p-4"}>
-        <div className="flex items-start justify-between gap-3">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              {confirmed && (
-                <Badge variant="outline" className="bg-success-light text-success border-success/20 text-xs">
-                  <CheckCircle2 className="h-3 w-3 mr-1" />
-                  Confirmado
+            <div className="flex items-center gap-2 mb-2">
+              <Clock className="h-4 w-4 text-primary" />
+              <span className="font-medium text-sm">
+                {slot.horario_inicio.substring(0, 5)} - {slot.horario_fim.substring(0, 5)}
+              </span>
+              {slot.descricao && (
+                <Badge variant="outline" className="text-xs">
+                  {slot.descricao}
                 </Badge>
               )}
-              <Badge variant="outline" className="text-xs">
-                {training.tipo === "online" ? (
-                  <>
-                    <Video className="h-3 w-3 mr-1" />
-                    Online
-                  </>
-                ) : (
-                  <>
-                    <MapPin className="h-3 w-3 mr-1" />
-                    Presencial
-                  </>
-                )}
-              </Badge>
             </div>
             
-            <h3 className="font-medium text-sm">{training.titulo}</h3>
-            
-            <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {format(new Date(training.data + "T00:00:00"), "dd/MM")} às {training.horario_inicio.substring(0, 5)}
+            <div className="flex items-center gap-1">
+              <Users className="h-3 w-3 text-muted-foreground" />
+              <span className={`text-xs ${isFull ? 'text-destructive font-medium' : isAlmostFull ? 'text-warning font-medium' : 'text-muted-foreground'}`}>
+                {isFull ? "Sem vagas" : `${spotsLeft} de ${slot.vagasTotais} vagas`}
               </span>
-              <span>•</span>
-              <span>{training.horario_inicio.substring(0, 5)} - {training.horario_fim.substring(0, 5)}</span>
             </div>
 
-            {!compact && (
-              <div className="flex items-center gap-1 mt-2">
-                <Users className="h-3 w-3 text-muted-foreground" />
-                <span className={`text-xs ${isAlmostFull ? 'text-warning font-medium' : 'text-muted-foreground'}`}>
-                  {isFull ? "Sem vagas" : `${spotsLeft} vagas restantes`}
-                </span>
-              </div>
+            {confirmed && (
+              <Badge variant="outline" className="bg-success-light text-success border-success/20 text-xs mt-2">
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+                Você está agendado
+              </Badge>
             )}
           </div>
 
           {!confirmed && !isFull && (
             <Button 
               size="sm" 
-              className="shrink-0"
-              onClick={() => onAgendar(training.id)}
+              onClick={onAgendar}
               disabled={booking}
             >
               {booking ? (
@@ -323,6 +420,12 @@ function TrainingCard({ training, compact = false, confirmed, onAgendar, booking
                 "Agendar"
               )}
             </Button>
+          )}
+
+          {isFull && !confirmed && (
+            <Badge variant="secondary" className="text-xs">
+              Lotado
+            </Badge>
           )}
         </div>
       </CardContent>
