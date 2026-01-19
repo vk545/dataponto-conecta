@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { MobileLayout } from "@/components/layout/MobileLayout";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,46 +8,164 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import {
-  User,
   Phone,
   Mail,
   MapPin,
   Calendar,
   Wrench,
   CheckCircle2,
-  Clock,
   Star,
   Award,
   LogOut,
   Settings,
-  Bell
+  Bell,
+  Loader2
 } from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
-const technicianData = {
-  name: "João Silva",
-  id: "TEC-001",
-  email: "joao.silva@dataponto.com.br",
-  phone: "(11) 98852-0276",
-  region: "São Paulo - Capital",
-  startDate: "15/03/2022",
-  specializations: ["Relógios de Ponto", "Catracas", "Controle de Acesso"],
+interface TecnicoData {
+  profile: {
+    nome: string;
+    email: string;
+    telefone: string | null;
+    created_at: string | null;
+  };
+  tecnico: {
+    id: string;
+    especialidade: string | null;
+    regiao: string | null;
+    disponivel: boolean | null;
+  };
   stats: {
-    totalServices: 1247,
-    monthServices: 45,
-    avgRating: 4.9,
-    completionRate: 98.5,
-  },
-};
+    totalServices: number;
+    monthServices: number;
+    completedServices: number;
+  };
+}
 
 export default function TecnicoPerfil() {
   const navigate = useNavigate();
   const { signOut, profile } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [tecnicoData, setTecnicoData] = useState<TecnicoData | null>(null);
+
+  useEffect(() => {
+    if (profile) {
+      fetchTecnicoData();
+    }
+  }, [profile]);
+
+  const fetchTecnicoData = async () => {
+    if (!profile) return;
+
+    try {
+      // Buscar dados do técnico
+      const { data: tecnico, error: tecnicoError } = await supabase
+        .from("tecnicos")
+        .select("*")
+        .eq("profile_id", profile.id)
+        .maybeSingle();
+
+      if (tecnicoError) throw tecnicoError;
+
+      // Buscar estatísticas de chamados
+      let totalServices = 0;
+      let monthServices = 0;
+      let completedServices = 0;
+
+      if (tecnico) {
+        // Total de chamados
+        const { count: total } = await supabase
+          .from("chamados_internos")
+          .select("*", { count: "exact", head: true })
+          .eq("tecnico_id", tecnico.id);
+
+        totalServices = total || 0;
+
+        // Chamados finalizados
+        const { count: completed } = await supabase
+          .from("chamados_internos")
+          .select("*", { count: "exact", head: true })
+          .eq("tecnico_id", tecnico.id)
+          .eq("status", "finalizado");
+
+        completedServices = completed || 0;
+
+        // Chamados deste mês
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
+
+        const { count: monthly } = await supabase
+          .from("chamados_internos")
+          .select("*", { count: "exact", head: true })
+          .eq("tecnico_id", tecnico.id)
+          .gte("created_at", startOfMonth.toISOString());
+
+        monthServices = monthly || 0;
+      }
+
+      setTecnicoData({
+        profile: {
+          nome: profile.nome,
+          email: profile.email,
+          telefone: profile.telefone,
+          created_at: profile.created_at,
+        },
+        tecnico: tecnico || {
+          id: "",
+          especialidade: null,
+          regiao: null,
+          disponivel: true,
+        },
+        stats: {
+          totalServices,
+          monthServices,
+          completedServices,
+        },
+      });
+    } catch (error) {
+      console.error("Erro ao buscar dados:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogout = async () => {
     await signOut();
     navigate("/auth");
   };
+
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .substring(0, 2)
+      .toUpperCase();
+  };
+
+  const completionRate = tecnicoData?.stats.totalServices 
+    ? Math.round((tecnicoData.stats.completedServices / tecnicoData.stats.totalServices) * 100)
+    : 0;
+
+  const specializations = tecnicoData?.tecnico.especialidade
+    ? tecnicoData.tecnico.especialidade.split(",").map((s) => s.trim())
+    : ["Relógios de Ponto", "Catracas", "Controle de Acesso"];
+
+  if (loading) {
+    return (
+      <MobileLayout showBottomNav={false}>
+        <PageHeader title="Meu Perfil" subtitle="Área do Técnico" backTo="/tecnico" />
+        <div className="flex items-center justify-center p-8">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </MobileLayout>
+    );
+  }
 
   return (
     <MobileLayout showBottomNav={false}>
@@ -63,15 +182,17 @@ export default function TecnicoPerfil() {
             <div className="flex items-center gap-4">
               <Avatar className="h-20 w-20 border-4 border-white/20">
                 <AvatarFallback className="bg-white text-primary text-xl font-bold">
-                  JS
+                  {tecnicoData ? getInitials(tecnicoData.profile.nome) : "??"}
                 </AvatarFallback>
               </Avatar>
               <div className="text-white">
-                <h2 className="font-bold text-xl">{technicianData.name}</h2>
-                <p className="text-white/80 font-mono">{technicianData.id}</p>
+                <h2 className="font-bold text-xl">{tecnicoData?.profile.nome}</h2>
+                <p className="text-white/80 font-mono text-sm">
+                  TEC-{tecnicoData?.tecnico.id?.substring(0, 6).toUpperCase() || "000000"}
+                </p>
                 <Badge className="mt-2 bg-white/20 text-white border-white/30">
                   <Star className="h-3 w-3 mr-1 fill-yellow-400 text-yellow-400" />
-                  Técnico Sênior
+                  {tecnicoData?.tecnico.disponivel ? "Disponível" : "Ocupado"}
                 </Badge>
               </div>
             </div>
@@ -80,20 +201,29 @@ export default function TecnicoPerfil() {
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center gap-3 text-sm">
               <Mail className="h-4 w-4 text-muted-foreground" />
-              <span>{technicianData.email}</span>
+              <span>{tecnicoData?.profile.email}</span>
             </div>
-            <div className="flex items-center gap-3 text-sm">
-              <Phone className="h-4 w-4 text-muted-foreground" />
-              <span>{technicianData.phone}</span>
-            </div>
-            <div className="flex items-center gap-3 text-sm">
-              <MapPin className="h-4 w-4 text-muted-foreground" />
-              <span>{technicianData.region}</span>
-            </div>
-            <div className="flex items-center gap-3 text-sm">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-              <span>Na empresa desde {technicianData.startDate}</span>
-            </div>
+            {tecnicoData?.profile.telefone && (
+              <div className="flex items-center gap-3 text-sm">
+                <Phone className="h-4 w-4 text-muted-foreground" />
+                <span>{tecnicoData.profile.telefone}</span>
+              </div>
+            )}
+            {tecnicoData?.tecnico.regiao && (
+              <div className="flex items-center gap-3 text-sm">
+                <MapPin className="h-4 w-4 text-muted-foreground" />
+                <span>{tecnicoData.tecnico.regiao}</span>
+              </div>
+            )}
+            {tecnicoData?.profile.created_at && (
+              <div className="flex items-center gap-3 text-sm">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <span>
+                  Na empresa desde{" "}
+                  {format(new Date(tecnicoData.profile.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                </span>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -108,22 +238,25 @@ export default function TecnicoPerfil() {
           <CardContent>
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-primary-light rounded-lg p-3 text-center">
-                <p className="text-2xl font-bold text-primary">{technicianData.stats.totalServices}</p>
+                <p className="text-2xl font-bold text-primary">
+                  {tecnicoData?.stats.totalServices || 0}
+                </p>
                 <p className="text-xs text-muted-foreground">Total de Atendimentos</p>
               </div>
               <div className="bg-success-light rounded-lg p-3 text-center">
-                <p className="text-2xl font-bold text-success">{technicianData.stats.monthServices}</p>
+                <p className="text-2xl font-bold text-success">
+                  {tecnicoData?.stats.monthServices || 0}
+                </p>
                 <p className="text-xs text-muted-foreground">Este Mês</p>
               </div>
               <div className="bg-warning-light rounded-lg p-3 text-center">
-                <div className="flex items-center justify-center gap-1">
-                  <Star className="h-5 w-5 text-warning fill-warning" />
-                  <p className="text-2xl font-bold text-warning">{technicianData.stats.avgRating}</p>
-                </div>
-                <p className="text-xs text-muted-foreground">Avaliação Média</p>
+                <p className="text-2xl font-bold text-warning">
+                  {tecnicoData?.stats.completedServices || 0}
+                </p>
+                <p className="text-xs text-muted-foreground">Finalizados</p>
               </div>
               <div className="bg-info-light rounded-lg p-3 text-center">
-                <p className="text-2xl font-bold text-info">{technicianData.stats.completionRate}%</p>
+                <p className="text-2xl font-bold text-info">{completionRate}%</p>
                 <p className="text-xs text-muted-foreground">Taxa de Conclusão</p>
               </div>
             </div>
@@ -140,7 +273,7 @@ export default function TecnicoPerfil() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              {technicianData.specializations.map((spec) => (
+              {specializations.map((spec) => (
                 <Badge key={spec} variant="secondary" className="flex items-center gap-1">
                   <CheckCircle2 className="h-3 w-3" />
                   {spec}
@@ -158,7 +291,6 @@ export default function TecnicoPerfil() {
                 <Bell className="h-4 w-4 text-primary" />
               </div>
               <span className="flex-1 text-sm font-medium text-left">Notificações</span>
-              <Badge variant="secondary">3</Badge>
             </button>
             <Separator />
             <button className="flex items-center gap-3 p-4 w-full hover:bg-muted/50 transition-colors">

@@ -16,6 +16,7 @@ import ChamadoDetalhe from "./pages/ChamadoDetalhe";
 import Equipamentos from "./pages/Equipamentos";
 import Perfil from "./pages/Perfil";
 import Contrato from "./pages/Contrato";
+import DadosEmpresa from "./pages/DadosEmpresa";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -94,6 +95,7 @@ const AppRoutes = () => {
       <Route path="/equipamentos" element={<ProtectedRoute><Equipamentos /></ProtectedRoute>} />
       <Route path="/perfil" element={<ProtectedRoute><Perfil /></ProtectedRoute>} />
       <Route path="/perfil/contrato" element={<ProtectedRoute><Contrato /></ProtectedRoute>} />
+      <Route path="/perfil/empresa" element={<ProtectedRoute><DadosEmpresa /></ProtectedRoute>} />
       
       {/* Área Técnica */}
       <Route path="/tecnico" element={<ProtectedRoute><TecnicoDashboard /></ProtectedRoute>} />
