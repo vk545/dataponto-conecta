@@ -55,6 +55,8 @@ interface Agendamento {
     nome: string;
     email: string;
     empresa: string | null;
+    cnpj: string | null;
+    telefone: string | null;
   };
 }
 
@@ -117,7 +119,9 @@ export default function GerenciarTreinamentos() {
           profiles:profile_id (
             nome,
             email,
-            empresa
+            empresa,
+            cnpj,
+            telefone
           )
         `)
         .eq("treinamento_id", treinamentoId);
@@ -141,7 +145,7 @@ export default function GerenciarTreinamentos() {
   };
 
   const getTreinamentosPorData = (data: string) => {
-    return treinamentos.filter(t => t.data === data && t.ativo);
+    return treinamentos.filter(t => t.data === data);
   };
 
   const handleDeleteTreinamento = async (id: string) => {
@@ -574,22 +578,37 @@ export default function GerenciarTreinamentos() {
                   agendamentos.map(agendamento => (
                     <div key={agendamento.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-                          <User className="h-4 w-4 text-primary" />
+                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <User className="h-5 w-5 text-primary" />
                         </div>
-                        <div>
-                          <p className="font-medium text-sm">{agendamento.profile?.nome}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {agendamento.profile?.empresa || agendamento.profile?.email}
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm truncate">
+                            {agendamento.profile?.empresa || agendamento.profile?.nome || "Sem nome"}
                           </p>
+                          {agendamento.profile?.cnpj && (
+                            <p className="text-xs text-muted-foreground">
+                              CNPJ: {agendamento.profile.cnpj}
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground truncate">
+                            {agendamento.profile?.nome !== agendamento.profile?.email 
+                              ? agendamento.profile?.nome 
+                              : ""} • {agendamento.profile?.email}
+                          </p>
+                          {agendamento.profile?.telefone && (
+                            <p className="text-xs text-muted-foreground">
+                              Tel: {agendamento.profile.telefone}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <Button
                         variant={agendamento.presente ? "default" : "outline"}
                         size="sm"
+                        className="flex-shrink-0"
                         onClick={() => handleTogglePresenca(agendamento.id, !agendamento.presente)}
                       >
-                        {agendamento.presente ? "Presente" : "Marcar presença"}
+                        {agendamento.presente ? "Presente" : "Marcar"}
                       </Button>
                     </div>
                   ))
