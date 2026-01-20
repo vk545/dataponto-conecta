@@ -42,6 +42,7 @@ interface Slot {
   horario_fim: string;
   ativo: boolean;
   descricao: string | null;
+  vagas_padrao: number;
 }
 
 interface Agendamento {
@@ -75,6 +76,7 @@ export default function GerenciarTreinamentos() {
   const [novoSlotInicio, setNovoSlotInicio] = useState("09:00");
   const [novoSlotFim, setNovoSlotFim] = useState("11:00");
   const [novoSlotDescricao, setNovoSlotDescricao] = useState("");
+  const [novoSlotVagas, setNovoSlotVagas] = useState(10);
 
   useEffect(() => {
     fetchData();
@@ -83,12 +85,15 @@ export default function GerenciarTreinamentos() {
   const fetchData = async () => {
     try {
       const [treinamentosRes, slotsRes] = await Promise.all([
+        // Buscar todos os treinamentos (coordenador vê todos, inclusive inativos)
         supabase.from("treinamentos").select("*").order("data", { ascending: true }),
         supabase.from("slots_treinamento").select("*").order("horario_inicio")
       ]);
 
       if (treinamentosRes.error) throw treinamentosRes.error;
       if (slotsRes.error) throw slotsRes.error;
+      
+      console.log("Treinamentos carregados:", treinamentosRes.data);
       
       setTreinamentos((treinamentosRes.data as Treinamento[]) || []);
       setSlots((slotsRes.data as Slot[]) || []);
@@ -181,6 +186,7 @@ export default function GerenciarTreinamentos() {
           horario_inicio: novoSlotInicio + ":00",
           horario_fim: novoSlotFim + ":00",
           descricao: novoSlotDescricao || null,
+          vagas_padrao: novoSlotVagas,
           ativo: true,
         })
         .select()
@@ -192,6 +198,7 @@ export default function GerenciarTreinamentos() {
       setNovoSlotInicio("09:00");
       setNovoSlotFim("11:00");
       setNovoSlotDescricao("");
+      setNovoSlotVagas(10);
 
       toast({
         title: "Horário adicionado!",
@@ -454,6 +461,10 @@ export default function GerenciarTreinamentos() {
                             </span>
                           )}
                         </div>
+                        <Badge variant="outline" className="text-xs">
+                          <Users className="h-3 w-3 mr-1" />
+                          {slot.vagas_padrao} vagas
+                        </Badge>
                         <Badge variant={slot.ativo ? "default" : "secondary"} className="text-xs">
                           {slot.ativo ? "Ativo" : "Inativo"}
                         </Badge>
@@ -505,13 +516,25 @@ export default function GerenciarTreinamentos() {
                       />
                     </div>
                   </div>
-                  <div>
-                    <Label className="text-xs">Descrição (opcional)</Label>
-                    <Input
-                      placeholder="Ex: Manhã, Tarde..."
-                      value={novoSlotDescricao}
-                      onChange={(e) => setNovoSlotDescricao(e.target.value)}
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs">Descrição (opcional)</Label>
+                      <Input
+                        placeholder="Ex: Manhã, Tarde..."
+                        value={novoSlotDescricao}
+                        onChange={(e) => setNovoSlotDescricao(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Vagas</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={novoSlotVagas}
+                        onChange={(e) => setNovoSlotVagas(parseInt(e.target.value) || 10)}
+                      />
+                    </div>
                   </div>
                   <Button onClick={handleAddSlot} className="w-full">
                     <Plus className="h-4 w-4 mr-2" />

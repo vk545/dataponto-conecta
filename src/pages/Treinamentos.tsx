@@ -17,6 +17,7 @@ interface Slot {
   horario_inicio: string;
   horario_fim: string;
   descricao: string | null;
+  vagas_padrao: number;
 }
 
 interface Treinamento {
@@ -37,11 +38,11 @@ interface Agendamento {
 
 // Slots padrão caso não tenha no banco
 const DEFAULT_SLOTS: Omit<Slot, "id">[] = [
-  { horario_inicio: "09:00:00", horario_fim: "11:00:00", descricao: "Manhã" },
-  { horario_inicio: "14:00:00", horario_fim: "16:00:00", descricao: "Tarde" },
+  { horario_inicio: "09:00:00", horario_fim: "11:00:00", descricao: "Manhã", vagas_padrao: 10 },
+  { horario_inicio: "14:00:00", horario_fim: "16:00:00", descricao: "Tarde", vagas_padrao: 10 },
 ];
 
-const MAX_VAGAS_POR_SLOT = 10;
+const DEFAULT_VAGAS = 10;
 
 export default function Treinamentos() {
   const { profile } = useAuth();
@@ -106,12 +107,14 @@ export default function Treinamentos() {
         t => t.data === dateStr && t.horario_inicio === slot.horario_inicio
       );
 
+      const vagasPadrao = slot.vagas_padrao || DEFAULT_VAGAS;
+
       return {
         ...slot,
         dateStr,
         treinamento: treinamentoExistente,
-        vagasDisponiveis: treinamentoExistente?.vagas_disponiveis ?? MAX_VAGAS_POR_SLOT,
-        vagasTotais: treinamentoExistente?.vagas_totais ?? MAX_VAGAS_POR_SLOT,
+        vagasDisponiveis: treinamentoExistente?.vagas_disponiveis ?? vagasPadrao,
+        vagasTotais: treinamentoExistente?.vagas_totais ?? vagasPadrao,
       };
     });
   };
@@ -143,6 +146,7 @@ export default function Treinamentos() {
 
       // Se não existe treinamento, cria um automaticamente
       if (!treinamentoId) {
+        const vagasPadrao = slot.vagas_padrao || DEFAULT_VAGAS;
         const { data: novoTreinamento, error: createError } = await supabase
           .from("treinamentos")
           .insert({
@@ -151,8 +155,8 @@ export default function Treinamentos() {
             horario_inicio: slot.horario_inicio,
             horario_fim: slot.horario_fim,
             tipo: "presencial",
-            vagas_totais: MAX_VAGAS_POR_SLOT,
-            vagas_disponiveis: MAX_VAGAS_POR_SLOT - 1, // Já desconta a vaga atual
+            vagas_totais: vagasPadrao,
+            vagas_disponiveis: vagasPadrao - 1, // Já desconta a vaga atual
             ativo: true,
             created_by: profile.id,
           })
