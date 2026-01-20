@@ -267,6 +267,7 @@ export type Database = {
           horario_fim: string
           horario_inicio: string
           id: string
+          vagas_padrao: number
         }
         Insert: {
           ativo?: boolean | null
@@ -275,6 +276,7 @@ export type Database = {
           horario_fim: string
           horario_inicio: string
           id?: string
+          vagas_padrao?: number
         }
         Update: {
           ativo?: boolean | null
@@ -283,6 +285,7 @@ export type Database = {
           horario_fim?: string
           horario_inicio?: string
           id?: string
+          vagas_padrao?: number
         }
         Relationships: []
       }
