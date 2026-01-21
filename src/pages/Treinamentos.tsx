@@ -142,50 +142,21 @@ export default function Treinamentos() {
     setBooking(bookingKey);
 
     try {
-      let treinamentoId = slot.treinamento?.id;
+      const treinamentoId = slot.treinamento?.id;
 
-      // Se não existe treinamento, cria um automaticamente
+      // Clients can only book existing trainings created by coordinators
       if (!treinamentoId) {
-        const vagasPadrao = slot.vagas_padrao || DEFAULT_VAGAS;
-        const { data: novoTreinamento, error: createError } = await supabase
-          .from("treinamentos")
-          .insert({
-            titulo: `Treinamento ${slot.descricao || ""}`.trim(),
-            data: slot.dateStr,
-            horario_inicio: slot.horario_inicio,
-            horario_fim: slot.horario_fim,
-            tipo: "presencial",
-            vagas_totais: vagasPadrao,
-            vagas_disponiveis: vagasPadrao - 1, // Já desconta a vaga atual
-            ativo: true,
-            created_by: profile.id,
-          })
-          .select()
-          .single();
-
-        if (createError) throw createError;
-        treinamentoId = novoTreinamento.id;
-
-        // Adiciona à lista local
-        setTreinamentos(prev => [...prev, novoTreinamento as Treinamento]);
-      } else {
-        // Atualiza vagas do treinamento existente
-        const { error: updateError } = await supabase
-          .from("treinamentos")
-          .update({ vagas_disponiveis: slot.vagasDisponiveis - 1 })
-          .eq("id", treinamentoId);
-
-        if (updateError) throw updateError;
-
-        // Atualiza local
-        setTreinamentos(prev =>
-          prev.map(t =>
-            t.id === treinamentoId
-              ? { ...t, vagas_disponiveis: t.vagas_disponiveis - 1 }
-              : t
-          )
-        );
+        toast({
+          title: "Horário não disponível",
+          description: "Este horário ainda não está aberto para agendamento. Por favor, escolha outro horário com vagas disponíveis.",
+          variant: "destructive",
+        });
+        setBooking(null);
+        return;
       }
+
+      // The decrement_vagas trigger will handle slot updates automatically
+      // when we insert into agendamentos_treinamento
 
       // Cria o agendamento
       const { error: agendamentoError } = await supabase
@@ -198,6 +169,14 @@ export default function Treinamentos() {
 
       if (agendamentoError) throw agendamentoError;
 
+      // Update local state to reflect the booking
+      setTreinamentos(prev =>
+        prev.map(t =>
+          t.id === treinamentoId
+            ? { ...t, vagas_disponiveis: t.vagas_disponiveis - 1 }
+            : t
+        )
+      );
       setAgendamentos(prev => [...prev, { treinamento_id: treinamentoId!, confirmado: true }]);
 
       toast({

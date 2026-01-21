@@ -55,6 +55,25 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Role-based route protection for defense-in-depth
+function RoleProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles: string[] }) {
+  const { profile, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+  
+  if (!profile || !allowedRoles.includes(profile.tipo)) {
+    return <Navigate to="/" replace />;
+  }
+  
+  return <>{children}</>;
+}
+
 function RoleBasedRedirect() {
   const { profile, loading } = useAuth();
   
@@ -97,20 +116,20 @@ const AppRoutes = () => {
       <Route path="/perfil/contrato" element={<ProtectedRoute><Contrato /></ProtectedRoute>} />
       <Route path="/perfil/empresa" element={<ProtectedRoute><DadosEmpresa /></ProtectedRoute>} />
       
-      {/* Área Técnica */}
-      <Route path="/tecnico" element={<ProtectedRoute><TecnicoDashboard /></ProtectedRoute>} />
-      <Route path="/tecnico/rotas" element={<ProtectedRoute><TecnicoRotas /></ProtectedRoute>} />
-      <Route path="/tecnico/ordem/:id" element={<ProtectedRoute><OrdemServico /></ProtectedRoute>} />
-      <Route path="/tecnico/ordem/:id/assinatura" element={<ProtectedRoute><AssinaturaDigital /></ProtectedRoute>} />
-      <Route path="/tecnico/perfil" element={<ProtectedRoute><TecnicoPerfil /></ProtectedRoute>} />
-      <Route path="/tecnico/chat" element={<ProtectedRoute><TecnicoChat /></ProtectedRoute>} />
+      {/* Área Técnica - Protected by role */}
+      <Route path="/tecnico" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['tecnico']}><TecnicoDashboard /></RoleProtectedRoute></ProtectedRoute>} />
+      <Route path="/tecnico/rotas" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['tecnico']}><TecnicoRotas /></RoleProtectedRoute></ProtectedRoute>} />
+      <Route path="/tecnico/ordem/:id" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['tecnico']}><OrdemServico /></RoleProtectedRoute></ProtectedRoute>} />
+      <Route path="/tecnico/ordem/:id/assinatura" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['tecnico']}><AssinaturaDigital /></RoleProtectedRoute></ProtectedRoute>} />
+      <Route path="/tecnico/perfil" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['tecnico']}><TecnicoPerfil /></RoleProtectedRoute></ProtectedRoute>} />
+      <Route path="/tecnico/chat" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['tecnico']}><TecnicoChat /></RoleProtectedRoute></ProtectedRoute>} />
       
-      {/* Área Coordenador (Valdemar) */}
-      <Route path="/coordenador" element={<ProtectedRoute><CoordenadorDashboard /></ProtectedRoute>} />
-      <Route path="/coordenador/chamados/novo" element={<ProtectedRoute><NovoChamadoCoordenador /></ProtectedRoute>} />
-      <Route path="/coordenador/chamados/:id" element={<ProtectedRoute><DetalheChamado /></ProtectedRoute>} />
-      <Route path="/coordenador/chat/:tecnicoId" element={<ProtectedRoute><CoordenadorChat /></ProtectedRoute>} />
-      <Route path="/coordenador/treinamentos" element={<ProtectedRoute><GerenciarTreinamentos /></ProtectedRoute>} />
+      {/* Área Coordenador (Valdemar) - Protected by role */}
+      <Route path="/coordenador" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['coordenador']}><CoordenadorDashboard /></RoleProtectedRoute></ProtectedRoute>} />
+      <Route path="/coordenador/chamados/novo" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['coordenador']}><NovoChamadoCoordenador /></RoleProtectedRoute></ProtectedRoute>} />
+      <Route path="/coordenador/chamados/:id" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['coordenador']}><DetalheChamado /></RoleProtectedRoute></ProtectedRoute>} />
+      <Route path="/coordenador/chat/:tecnicoId" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['coordenador']}><CoordenadorChat /></RoleProtectedRoute></ProtectedRoute>} />
+      <Route path="/coordenador/treinamentos" element={<ProtectedRoute><RoleProtectedRoute allowedRoles={['coordenador']}><GerenciarTreinamentos /></RoleProtectedRoute></ProtectedRoute>} />
 
       <Route path="*" element={<NotFound />} />
     </Routes>
