@@ -86,10 +86,35 @@ export default function Auth() {
       return;
     }
 
-    if (registerPassword.length < 6) {
+    // Strong password validation
+    if (registerPassword.length < 8) {
       toast({
         title: "Senha fraca",
-        description: "A senha deve ter pelo menos 6 caracteres.",
+        description: "A senha deve ter pelo menos 8 caracteres.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!/[A-Z]/.test(registerPassword)) {
+      toast({
+        title: "Senha fraca",
+        description: "A senha deve conter ao menos uma letra maiúscula.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!/[a-z]/.test(registerPassword)) {
+      toast({
+        title: "Senha fraca",
+        description: "A senha deve conter ao menos uma letra minúscula.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!/[0-9]/.test(registerPassword)) {
+      toast({
+        title: "Senha fraca",
+        description: "A senha deve conter ao menos um número.",
         variant: "destructive",
       });
       return;
@@ -228,7 +253,7 @@ export default function Auth() {
                   <Input
                     id="register-password"
                     type="password"
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Mínimo 8 caracteres, maiúscula e número"
                     value={registerPassword}
                     onChange={(e) => setRegisterPassword(e.target.value)}
                     disabled={isLoading}
