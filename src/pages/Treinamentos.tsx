@@ -67,12 +67,11 @@ export default function Treinamentos() {
         .eq("ativo", true)
         .order("horario_inicio");
 
-      // Buscar treinamentos existentes
+      // Buscar treinamentos existentes (todos os ativos para poder mostrar agendamentos passados também)
       const { data: treinamentosData } = await supabase
         .from("treinamentos")
         .select("*")
         .eq("ativo", true)
-        .gte("data", format(new Date(), "yyyy-MM-dd"))
         .order("data", { ascending: true });
 
       // Buscar agendamentos do usuário
