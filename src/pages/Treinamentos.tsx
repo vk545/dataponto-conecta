@@ -354,9 +354,10 @@ interface SlotCardProps {
 }
 
 function SlotCard({ slot, confirmed, onAgendar, booking }: SlotCardProps) {
-  const spotsLeft = slot.vagasDisponiveis;
-  const isAlmostFull = spotsLeft <= 3 && spotsLeft > 0;
-  const isFull = spotsLeft <= 0;
+  const isOpen = Boolean(slot.treinamento?.id);
+  const spotsLeft = isOpen ? slot.vagasDisponiveis : 0;
+  const isAlmostFull = isOpen && spotsLeft <= 3 && spotsLeft > 0;
+  const isFull = isOpen && spotsLeft <= 0;
 
   return (
     <Card className="shadow-card card-interactive">
@@ -377,9 +378,19 @@ function SlotCard({ slot, confirmed, onAgendar, booking }: SlotCardProps) {
             
             <div className="flex items-center gap-1">
               <Users className="h-3 w-3 text-muted-foreground" />
-              <span className={`text-xs ${isFull ? 'text-destructive font-medium' : isAlmostFull ? 'text-warning font-medium' : 'text-muted-foreground'}`}>
-                {isFull ? "Sem vagas" : `${spotsLeft} de ${slot.vagasTotais} vagas`}
-              </span>
+               <span
+                 className={`text-xs ${
+                   !isOpen
+                     ? "text-muted-foreground"
+                     : isFull
+                       ? "text-destructive font-medium"
+                       : isAlmostFull
+                         ? "text-warning font-medium"
+                         : "text-muted-foreground"
+                 }`}
+               >
+                 {!isOpen ? "Horário ainda não aberto" : isFull ? "Sem vagas" : `${spotsLeft} de ${slot.vagasTotais} vagas`}
+               </span>
             </div>
 
             {confirmed && (
@@ -390,7 +401,7 @@ function SlotCard({ slot, confirmed, onAgendar, booking }: SlotCardProps) {
             )}
           </div>
 
-          {!confirmed && !isFull && (
+          {!confirmed && isOpen && !isFull && (
             <Button 
               size="sm" 
               onClick={onAgendar}
@@ -407,6 +418,12 @@ function SlotCard({ slot, confirmed, onAgendar, booking }: SlotCardProps) {
           {isFull && !confirmed && (
             <Badge variant="secondary" className="text-xs">
               Lotado
+            </Badge>
+          )}
+
+          {!isOpen && !confirmed && (
+            <Badge variant="secondary" className="text-xs">
+              Indisponível
             </Badge>
           )}
         </div>
