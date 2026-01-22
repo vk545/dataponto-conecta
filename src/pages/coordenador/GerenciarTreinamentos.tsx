@@ -69,10 +69,12 @@ export default function GerenciarTreinamentos() {
   const [slots, setSlots] = useState<Slot[]>([]);
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openingAgenda, setOpeningAgenda] = useState(false);
   const [slotsDialogOpen, setSlotsDialogOpen] = useState(false);
   const [agendamentosDialogOpen, setAgendamentosDialogOpen] = useState(false);
   const [selectedTreinamento, setSelectedTreinamento] = useState<Treinamento | null>(null);
   const [calendarDate, setCalendarDate] = useState<Date>(new Date());
+  const [mesAgenda, setMesAgenda] = useState(() => format(new Date(), "yyyy-MM"));
   
   // Slots form
   const [novoSlotInicio, setNovoSlotInicio] = useState("09:00");
@@ -253,6 +255,142 @@ export default function GerenciarTreinamentos() {
       });
     } catch (error) {
       console.error("Erro ao remover slot:", error);
+    }
+  };
+
+  const handleAbrirAgendaDoMes = async () => {
+    const activeSlots = slots.filter((s) => s.ativo);
+    if (activeSlots.length === 0) {
+      toast({
+        title: "Nenhum horário ativo",
+        description: "Ative ou adicione ao menos 1 horário para abrir a agenda.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (activeSlots.length > MAX_TREINAMENTOS_POR_DIA) {
+      toast({
+        title: "Muitos horários ativos",
+        description: `Você tem ${activeSlots.length} horários ativos, mas o máximo por dia é ${MAX_TREINAMENTOS_POR_DIA}. Desative alguns horários para continuar.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const [yearStr, monthStr] = mesAgenda.split("-");
+    const year = Number(yearStr);
+    const monthIndex = Number(monthStr) - 1; // 0-11
+
+    if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+      toast({
+        title: "Mês inválido",
+        description: "Selecione um mês válido para abrir a agenda.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setOpeningAgenda(true);
+    try {
+      // Indexar o que já existe para evitar duplicidade e respeitar limite por dia
+      const existingKeys = new Set(treinamentos.map((t) => `${t.data}-${t.horario_inicio}`));
+      const countByDay = treinamentos.reduce((acc, t) => {
+        acc[t.data] = (acc[t.data] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      // Listar dias do mês (apenas dias úteis)
+      const days: string[] = [];
+      let d = new Date(year, monthIndex, 1);
+      while (d.getMonth() === monthIndex) {
+        if (!isWeekend(d)) {
+          days.push(format(d, "yyyy-MM-dd"));
+        }
+        d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+      }
+
+      const inserts: Array<{
+        titulo: string;
+        descricao: string | null;
+        data: string;
+        horario_inicio: string;
+        horario_fim: string;
+        vagas_totais: number;
+        vagas_disponiveis: number;
+        ativo: boolean;
+      }> = [];
+
+      let skippedDuplicates = 0;
+      let skippedLimit = 0;
+
+      for (const dateStr of days) {
+        const currentCount = countByDay[dateStr] || 0;
+        let remaining = MAX_TREINAMENTOS_POR_DIA - currentCount;
+
+        for (const slot of activeSlots) {
+          if (remaining <= 0) {
+            skippedLimit++;
+            continue;
+          }
+
+          const key = `${dateStr}-${slot.horario_inicio}`;
+          if (existingKeys.has(key)) {
+            skippedDuplicates++;
+            continue;
+          }
+
+          const vagas = slot.vagas_padrao || DEFAULT_VAGAS;
+          inserts.push({
+            titulo: `Treinamento ${slot.descricao || slot.horario_inicio.substring(0, 5)}`,
+            descricao: null,
+            data: dateStr,
+            horario_inicio: slot.horario_inicio,
+            horario_fim: slot.horario_fim,
+            vagas_totais: vagas,
+            vagas_disponiveis: vagas,
+            ativo: true,
+          });
+
+          existingKeys.add(key);
+          countByDay[dateStr] = (countByDay[dateStr] || 0) + 1;
+          remaining--;
+        }
+      }
+
+      if (inserts.length === 0) {
+        toast({
+          title: "Nada para criar",
+          description: "A agenda desse mês já está aberta (ou não há dias úteis/horários válidos).",
+        });
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("treinamentos")
+        .insert(inserts)
+        .select("*");
+
+      if (error) throw error;
+
+      setTreinamentos((prev) => [...prev, ...((data as Treinamento[]) || [])]);
+
+      toast({
+        title: "Agenda aberta!",
+        description: `${inserts.length} treinamento(s) criado(s) para ${mesAgenda}.` +
+          (skippedDuplicates || skippedLimit
+            ? ` (Ignorados: ${skippedDuplicates} duplicado(s), ${skippedLimit} por limite diário.)`
+            : ""),
+      });
+    } catch (error) {
+      console.error("Erro ao abrir agenda do mês:", error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível abrir a agenda do mês.",
+        variant: "destructive",
+      });
+    } finally {
+      setOpeningAgenda(false);
     }
   };
 
@@ -448,6 +586,42 @@ export default function GerenciarTreinamentos() {
                 <p className="text-sm text-muted-foreground">
                   Configure os horários em que os clientes podem agendar treinamentos.
                 </p>
+
+                {/* Abrir agenda do mês */}
+                <div className="border rounded-lg p-3 bg-muted/30 space-y-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Abrir agenda do mês</p>
+                    <p className="text-xs text-muted-foreground">
+                      Isso cria automaticamente os treinamentos (dias úteis) para os horários ativos.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs">Mês</Label>
+                      <Input
+                        type="month"
+                        value={mesAgenda}
+                        onChange={(e) => setMesAgenda(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        className="w-full"
+                        onClick={handleAbrirAgendaDoMes}
+                        disabled={openingAgenda}
+                      >
+                        {openingAgenda ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Abrindo...
+                          </>
+                        ) : (
+                          "Abrir agenda"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
 
                 {/* Slots existentes */}
                 <div className="space-y-2">
