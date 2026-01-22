@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   Plus, 
   Clock, 
@@ -17,12 +18,19 @@ import {
   Settings,
   Calendar as CalendarIcon,
   Loader2,
-  User
+  User,
+  Building2,
+  Phone,
+  Mail,
+  Bell,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
-import { format, isWeekend } from "date-fns";
+import { format, isWeekend, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, isToday } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 
 interface Treinamento {
   id: string;
@@ -51,6 +59,7 @@ interface Agendamento {
   profile_id: string;
   confirmado: boolean;
   presente: boolean | null;
+  created_at: string;
   profile?: {
     nome: string;
     email: string;
@@ -67,14 +76,15 @@ export default function GerenciarTreinamentos() {
   const { toast } = useToast();
   const [treinamentos, setTreinamentos] = useState<Treinamento[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
-  const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
+  const [allAgendamentos, setAllAgendamentos] = useState<Agendamento[]>([]);
   const [loading, setLoading] = useState(true);
   const [openingAgenda, setOpeningAgenda] = useState(false);
-  const [slotsDialogOpen, setSlotsDialogOpen] = useState(false);
   const [agendamentosDialogOpen, setAgendamentosDialogOpen] = useState(false);
   const [selectedTreinamento, setSelectedTreinamento] = useState<Treinamento | null>(null);
-  const [calendarDate, setCalendarDate] = useState<Date>(new Date());
+  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [mesAgenda, setMesAgenda] = useState(() => format(new Date(), "yyyy-MM"));
+  const [recentAgendamentos, setRecentAgendamentos] = useState<Agendamento[]>([]);
   
   // Slots form
   const [novoSlotInicio, setNovoSlotInicio] = useState("09:00");
@@ -88,36 +98,16 @@ export default function GerenciarTreinamentos() {
 
   const fetchData = async () => {
     try {
-      const [treinamentosRes, slotsRes] = await Promise.all([
-        // Buscar todos os treinamentos (coordenador vê todos, inclusive inativos)
+      const [treinamentosRes, slotsRes, agendamentosRes] = await Promise.all([
         supabase.from("treinamentos").select("*").order("data", { ascending: true }),
-        supabase.from("slots_treinamento").select("*").order("horario_inicio")
-      ]);
-
-      if (treinamentosRes.error) throw treinamentosRes.error;
-      if (slotsRes.error) throw slotsRes.error;
-      
-      console.log("Treinamentos carregados:", treinamentosRes.data);
-      
-      setTreinamentos((treinamentosRes.data as Treinamento[]) || []);
-      setSlots((slotsRes.data as Slot[]) || []);
-    } catch (error) {
-      console.error("Erro ao buscar dados:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchAgendamentos = async (treinamentoId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("agendamentos_treinamento")
-        .select(`
+        supabase.from("slots_treinamento").select("*").order("horario_inicio"),
+        supabase.from("agendamentos_treinamento").select(`
           id,
           treinamento_id,
           profile_id,
           confirmado,
           presente,
+          created_at,
           profiles:profile_id (
             nome,
             email,
@@ -125,29 +115,99 @@ export default function GerenciarTreinamentos() {
             cnpj,
             telefone
           )
-        `)
-        .eq("treinamento_id", treinamentoId);
+        `).order("created_at", { ascending: false })
+      ]);
 
-      if (error) throw error;
+      if (treinamentosRes.error) throw treinamentosRes.error;
+      if (slotsRes.error) throw slotsRes.error;
       
-      // Transform data to match interface
-      const transformedData = (data || []).map((item: any) => ({
+      const transformedAgendamentos = (agendamentosRes.data || []).map((item: any) => ({
         id: item.id,
         treinamento_id: item.treinamento_id,
         profile_id: item.profile_id,
         confirmado: item.confirmado,
         presente: item.presente,
+        created_at: item.created_at,
         profile: item.profiles
       }));
       
-      setAgendamentos(transformedData);
+      setTreinamentos((treinamentosRes.data as Treinamento[]) || []);
+      setSlots((slotsRes.data as Slot[]) || []);
+      setAllAgendamentos(transformedAgendamentos);
+      
+      // Agendamentos recentes (últimas 24h)
+      const oneDayAgo = new Date();
+      oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+      setRecentAgendamentos(
+        transformedAgendamentos.filter(a => new Date(a.created_at) > oneDayAgo)
+      );
     } catch (error) {
-      console.error("Erro ao buscar agendamentos:", error);
+      console.error("Erro ao buscar dados:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
+  // Realtime subscription for new bookings
+  useEffect(() => {
+    const channel = supabase
+      .channel("agendamentos-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "agendamentos_treinamento"
+        },
+        async (payload) => {
+          // Fetch profile data for the new booking
+          const { data: profileData } = await supabase
+            .from("profiles")
+            .select("nome, email, empresa, cnpj, telefone")
+            .eq("id", payload.new.profile_id)
+            .single();
+          
+          const newAgendamento: Agendamento = {
+            id: payload.new.id,
+            treinamento_id: payload.new.treinamento_id,
+            profile_id: payload.new.profile_id,
+            confirmado: payload.new.confirmado,
+            presente: payload.new.presente,
+            created_at: payload.new.created_at,
+            profile: profileData || undefined
+          };
+          
+          setAllAgendamentos(prev => [newAgendamento, ...prev]);
+          setRecentAgendamentos(prev => [newAgendamento, ...prev]);
+          
+          // Update treinamento vagas
+          setTreinamentos(prev => prev.map(t => 
+            t.id === payload.new.treinamento_id 
+              ? { ...t, vagas_disponiveis: Math.max(0, t.vagas_disponiveis - 1) }
+              : t
+          ));
+          
+          // Show notification toast
+          const treinamento = treinamentos.find(t => t.id === payload.new.treinamento_id);
+          toast({
+            title: "🔔 Novo agendamento!",
+            description: `${profileData?.empresa || profileData?.nome || "Cliente"} agendou para ${treinamento?.data ? format(new Date(treinamento.data), "dd/MM") : ""} às ${treinamento?.horario_inicio?.substring(0, 5) || ""}`,
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [treinamentos, toast]);
+
   const getTreinamentosPorData = (data: string) => {
     return treinamentos.filter(t => t.data === data);
+  };
+
+  const getAgendamentosPorTreinamento = (treinamentoId: string) => {
+    return allAgendamentos.filter(a => a.treinamento_id === treinamentoId);
   };
 
   const handleDeleteTreinamento = async (id: string) => {
@@ -280,7 +340,7 @@ export default function GerenciarTreinamentos() {
 
     const [yearStr, monthStr] = mesAgenda.split("-");
     const year = Number(yearStr);
-    const monthIndex = Number(monthStr) - 1; // 0-11
+    const monthIndex = Number(monthStr) - 1;
 
     if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) {
       toast({
@@ -293,14 +353,12 @@ export default function GerenciarTreinamentos() {
 
     setOpeningAgenda(true);
     try {
-      // Indexar o que já existe para evitar duplicidade e respeitar limite por dia
       const existingKeys = new Set(treinamentos.map((t) => `${t.data}-${t.horario_inicio}`));
       const countByDay = treinamentos.reduce((acc, t) => {
         acc[t.data] = (acc[t.data] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
 
-      // Listar dias do mês (apenas dias úteis)
       const days: string[] = [];
       let d = new Date(year, monthIndex, 1);
       while (d.getMonth() === monthIndex) {
@@ -396,7 +454,6 @@ export default function GerenciarTreinamentos() {
 
   const handleViewAgendamentos = (treinamento: Treinamento) => {
     setSelectedTreinamento(treinamento);
-    fetchAgendamentos(treinamento.id);
     setAgendamentosDialogOpen(true);
   };
 
@@ -409,7 +466,7 @@ export default function GerenciarTreinamentos() {
 
       if (error) throw error;
 
-      setAgendamentos(prev => 
+      setAllAgendamentos(prev => 
         prev.map(a => a.id === agendamentoId ? { ...a, presente } : a)
       );
 
@@ -421,6 +478,12 @@ export default function GerenciarTreinamentos() {
     }
   };
 
+  // Calendar helpers
+  const daysInMonth = eachDayOfInterval({
+    start: startOfMonth(currentMonth),
+    end: endOfMonth(currentMonth)
+  });
+
   const treinamentosPorData = treinamentos.reduce((acc, t) => {
     if (!acc[t.data]) acc[t.data] = [];
     acc[t.data].push(t);
@@ -428,11 +491,10 @@ export default function GerenciarTreinamentos() {
   }, {} as Record<string, Treinamento[]>);
 
   const trainingDates = Object.keys(treinamentosPorData);
-
-  // Verificar datas com limite atingido
-  const datasLotadas = trainingDates.filter(
-    data => treinamentosPorData[data].length >= MAX_TREINAMENTOS_POR_DIA
-  );
+  
+  // Selected day trainings
+  const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
+  const selectedDayTrainings = getTreinamentosPorData(selectedDateStr);
 
   if (loading) {
     return (
@@ -450,6 +512,40 @@ export default function GerenciarTreinamentos() {
       <PageHeader title="Gerenciar Treinamentos" showBack backTo="/coordenador" />
 
       <div className="p-4 space-y-4">
+        {/* Notificações recentes */}
+        {recentAgendamentos.length > 0 && (
+          <Card className="shadow-card bg-primary/5 border-primary/20">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Bell className="h-4 w-4 text-primary" />
+                <span className="font-medium text-sm">Agendamentos recentes</span>
+                <Badge variant="secondary" className="text-xs ml-auto">
+                  {recentAgendamentos.length} novo(s)
+                </Badge>
+              </div>
+              <div className="space-y-2">
+                {recentAgendamentos.slice(0, 3).map(agendamento => {
+                  const treinamento = treinamentos.find(t => t.id === agendamento.treinamento_id);
+                  return (
+                    <div key={agendamento.id} className="flex items-center gap-2 text-xs">
+                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <User className="h-3 w-3 text-primary" />
+                      </div>
+                      <span className="font-medium truncate">
+                        {agendamento.profile?.empresa || agendamento.profile?.nome}
+                      </span>
+                      <span className="text-muted-foreground">→</span>
+                      <span className="text-muted-foreground truncate">
+                        {treinamento && `${format(new Date(treinamento.data), "dd/MM")} ${treinamento.horario_inicio.substring(0, 5)}`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <Tabs defaultValue="calendario" className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="calendario">Calendário</TabsTrigger>
@@ -458,80 +554,194 @@ export default function GerenciarTreinamentos() {
           </TabsList>
 
           <TabsContent value="calendario" className="space-y-4 mt-4">
-            {/* Info */}
-            <Card className="shadow-card bg-primary/5 border-primary/20">
-              <CardContent className="p-4">
-                <p className="text-sm text-muted-foreground">
-                  Os clientes podem agendar treinamentos em qualquer dia útil. 
-                  Aqui você vê os treinamentos que foram agendados.
-                </p>
-              </CardContent>
-            </Card>
+            {/* Visual Calendar with side panel */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Calendar */}
+              <Card className="shadow-card">
+                <CardContent className="p-4">
+                  {/* Month navigation */}
+                  <div className="flex items-center justify-between mb-4">
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="font-medium">
+                      {format(currentMonth, "MMMM yyyy", { locale: ptBR })}
+                    </span>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  
+                  {/* Weekday headers */}
+                  <div className="grid grid-cols-7 gap-1 mb-2">
+                    {["D", "S", "T", "Q", "Q", "S", "S"].map((day, i) => (
+                      <div key={i} className="text-center text-xs font-medium text-muted-foreground py-1">
+                        {day}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Days grid */}
+                  <div className="grid grid-cols-7 gap-1">
+                    {/* Empty cells for days before first day of month */}
+                    {Array.from({ length: startOfMonth(currentMonth).getDay() }).map((_, i) => (
+                      <div key={`empty-${i}`} className="h-10" />
+                    ))}
+                    
+                    {daysInMonth.map((day) => {
+                      const dateStr = format(day, "yyyy-MM-dd");
+                      const dayTrainings = getTreinamentosPorData(dateStr);
+                      const hasTrainings = dayTrainings.length > 0;
+                      const totalBookings = dayTrainings.reduce((sum, t) => 
+                        sum + (t.vagas_totais - t.vagas_disponiveis), 0
+                      );
+                      const isSelected = isSameDay(day, selectedDate);
+                      const isCurrentDay = isToday(day);
+                      const isWeekendDay = isWeekend(day);
+                      
+                      return (
+                        <button
+                          key={dateStr}
+                          onClick={() => setSelectedDate(day)}
+                          disabled={isWeekendDay}
+                          className={cn(
+                            "h-10 rounded-lg flex flex-col items-center justify-center relative transition-colors",
+                            isWeekendDay && "opacity-30 cursor-not-allowed",
+                            isSelected && "bg-primary text-primary-foreground",
+                            !isSelected && isCurrentDay && "ring-1 ring-primary",
+                            !isSelected && hasTrainings && "bg-primary/10",
+                            !isSelected && !hasTrainings && !isWeekendDay && "hover:bg-muted"
+                          )}
+                        >
+                          <span className="text-sm">{format(day, "d")}</span>
+                          {hasTrainings && (
+                            <span className={cn(
+                              "text-[10px] leading-none",
+                              isSelected ? "text-primary-foreground/80" : "text-primary"
+                            )}>
+                              {totalBookings > 0 ? `${totalBookings}` : "•"}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  
+                  {/* Legend */}
+                  <div className="flex items-center gap-4 mt-4 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1">
+                      <div className="h-3 w-3 rounded bg-primary/10" />
+                      <span>Com agenda</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="h-3 w-3 rounded bg-primary" />
+                      <span>Selecionado</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-            {/* Calendar View */}
-            <Card className="shadow-card">
-              <CardContent className="p-3">
-                <Calendar
-                  mode="single"
-                  selected={calendarDate}
-                  onSelect={(date) => date && setCalendarDate(date)}
-                  locale={ptBR}
-                  className="w-full"
-                  disabled={(date) => isWeekend(date)}
-                  modifiers={{
-                    hasTraining: (date) => trainingDates.includes(format(date, "yyyy-MM-dd")),
-                    isFull: (date) => datasLotadas.includes(format(date, "yyyy-MM-dd")),
-                  }}
-                  modifiersStyles={{
-                    hasTraining: { 
-                      backgroundColor: 'hsl(var(--primary-light))',
-                      color: 'hsl(var(--primary))',
-                      fontWeight: 600,
-                    },
-                    isFull: {
-                      backgroundColor: 'hsl(var(--warning-light))',
-                      color: 'hsl(var(--warning))',
-                    }
-                  }}
-                />
-              </CardContent>
-            </Card>
-
-            {/* Treinamentos do dia selecionado */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-medium text-sm">
-                  {format(calendarDate, "EEEE, d 'de' MMMM", { locale: ptBR })}
-                </h3>
-                {!isWeekend(calendarDate) && (
-                  <Badge variant="outline" className="text-xs">
-                    {getTreinamentosPorData(format(calendarDate, "yyyy-MM-dd")).length} agendamento(s)
-                  </Badge>
-                )}
-              </div>
-
-              {isWeekend(calendarDate) ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  Não há treinamentos aos fins de semana
-                </p>
-              ) : (
-                <>
-                  {getTreinamentosPorData(format(calendarDate, "yyyy-MM-dd")).map((treinamento) => (
-                    <TreinamentoCard 
-                      key={treinamento.id} 
-                      treinamento={treinamento} 
-                      onDelete={handleDeleteTreinamento}
-                      onViewAgendamentos={() => handleViewAgendamentos(treinamento)}
-                    />
-                  ))}
-
-                  {getTreinamentosPorData(format(calendarDate, "yyyy-MM-dd")).length === 0 && (
+              {/* Side panel - Selected day details */}
+              <Card className="shadow-card">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <CalendarIcon className="h-4 w-4 text-primary" />
+                    {format(selectedDate, "EEEE, d 'de' MMMM", { locale: ptBR })}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {isWeekend(selectedDate) ? (
                     <p className="text-sm text-muted-foreground text-center py-4">
-                      Nenhum treinamento agendado para este dia
+                      Não há treinamentos aos fins de semana
                     </p>
+                  ) : selectedDayTrainings.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      Nenhum treinamento neste dia
+                    </p>
+                  ) : (
+                    <ScrollArea className="h-[300px] pr-2">
+                      <div className="space-y-3">
+                        {selectedDayTrainings.map((treinamento) => {
+                          const bookings = getAgendamentosPorTreinamento(treinamento.id);
+                          return (
+                            <div key={treinamento.id} className="border rounded-lg p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Clock className="h-4 w-4 text-primary" />
+                                  <span className="font-medium text-sm">
+                                    {treinamento.horario_inicio.substring(0, 5)} - {treinamento.horario_fim.substring(0, 5)}
+                                  </span>
+                                </div>
+                                <Badge variant={bookings.length > 0 ? "default" : "secondary"} className="text-xs">
+                                  {bookings.length}/{treinamento.vagas_totais}
+                                </Badge>
+                              </div>
+                              
+                              {/* Clientes agendados */}
+                              {bookings.length > 0 ? (
+                                <div className="space-y-1 pl-6">
+                                  {bookings.map((booking) => (
+                                    <div key={booking.id} className="flex items-center gap-2 text-xs py-1 border-l-2 border-primary/20 pl-2">
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-medium truncate">
+                                          {booking.profile?.empresa || booking.profile?.nome}
+                                        </p>
+                                        {booking.profile?.empresa && booking.profile?.nome && (
+                                          <p className="text-muted-foreground truncate">
+                                            {booking.profile.nome}
+                                          </p>
+                                        )}
+                                      </div>
+                                      <Badge 
+                                        variant={booking.presente ? "default" : "outline"} 
+                                        className="text-[10px] flex-shrink-0"
+                                      >
+                                        {booking.presente ? "✓" : "—"}
+                                      </Badge>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-muted-foreground pl-6">
+                                  Nenhum cliente agendado
+                                </p>
+                              )}
+                              
+                              <div className="flex items-center gap-1 pt-1">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="text-xs h-7"
+                                  onClick={() => handleViewAgendamentos(treinamento)}
+                                >
+                                  <Users className="h-3 w-3 mr-1" />
+                                  Gerenciar
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="text-xs h-7"
+                                  onClick={() => handleDeleteTreinamento(treinamento.id)}
+                                >
+                                  <Trash2 className="h-3 w-3 text-destructive" />
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </ScrollArea>
                   )}
-                </>
-              )}
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
 
@@ -546,18 +756,59 @@ export default function GerenciarTreinamentos() {
                     <CalendarIcon className="h-4 w-4 text-primary" />
                     {format(new Date(data + "T00:00:00"), "EEEE, d 'de' MMMM", { locale: ptBR })}
                     <Badge variant="outline" className="text-xs ml-auto">
-                      {lista.length} treinamento(s)
+                      {lista.reduce((sum, t) => sum + (t.vagas_totais - t.vagas_disponiveis), 0)} agendado(s)
                     </Badge>
                   </h3>
                   
-                  {lista.map((treinamento) => (
-                    <TreinamentoCard 
-                      key={treinamento.id} 
-                      treinamento={treinamento} 
-                      onDelete={handleDeleteTreinamento}
-                      onViewAgendamentos={() => handleViewAgendamentos(treinamento)}
-                    />
-                  ))}
+                  {lista.map((treinamento) => {
+                    const bookings = getAgendamentosPorTreinamento(treinamento.id);
+                    return (
+                      <Card key={treinamento.id} className="shadow-card">
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4 text-primary" />
+                              <span className="font-medium text-sm">
+                                {treinamento.horario_inicio.substring(0, 5)} - {treinamento.horario_fim.substring(0, 5)}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Button variant="outline" size="sm" onClick={() => handleViewAgendamentos(treinamento)}>
+                                <Users className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleDeleteTreinamento(treinamento.id)}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          </div>
+                          
+                          {/* Lista de clientes inline */}
+                          {bookings.length > 0 ? (
+                            <div className="space-y-1">
+                              {bookings.map((booking) => (
+                                <div key={booking.id} className="flex items-center gap-2 p-2 bg-muted/50 rounded text-sm">
+                                  <Building2 className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                  <span className="font-medium truncate flex-1">
+                                    {booking.profile?.empresa || booking.profile?.nome}
+                                  </span>
+                                  {booking.profile?.telefone && (
+                                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                      <Phone className="h-3 w-3" />
+                                      {booking.profile.telefone}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">
+                              Nenhum cliente agendado ainda
+                            </p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </div>
               ))}
 
@@ -566,7 +817,7 @@ export default function GerenciarTreinamentos() {
                 <CardContent className="p-6 text-center">
                   <CalendarIcon className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
                   <p className="text-sm text-muted-foreground">
-                    Nenhum treinamento agendado pelos clientes
+                    Nenhum treinamento agendado
                   </p>
                 </CardContent>
               </Card>
@@ -748,8 +999,8 @@ export default function GerenciarTreinamentos() {
               </div>
 
               <div className="space-y-2">
-                {agendamentos.length > 0 ? (
-                  agendamentos.map(agendamento => (
+                {getAgendamentosPorTreinamento(selectedTreinamento.id).length > 0 ? (
+                  getAgendamentosPorTreinamento(selectedTreinamento.id).map(agendamento => (
                     <div key={agendamento.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="flex items-center gap-3">
                         <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -764,14 +1015,21 @@ export default function GerenciarTreinamentos() {
                               CNPJ: {agendamento.profile.cnpj}
                             </p>
                           )}
-                          <p className="text-xs text-muted-foreground truncate">
-                            {agendamento.profile?.nome !== agendamento.profile?.email 
-                              ? agendamento.profile?.nome 
-                              : ""} • {agendamento.profile?.email}
-                          </p>
-                          {agendamento.profile?.telefone && (
-                            <p className="text-xs text-muted-foreground">
-                              Tel: {agendamento.profile.telefone}
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            {agendamento.profile?.nome && (
+                              <span>{agendamento.profile.nome}</span>
+                            )}
+                            {agendamento.profile?.telefone && (
+                              <span className="flex items-center gap-1">
+                                <Phone className="h-3 w-3" />
+                                {agendamento.profile.telefone}
+                              </span>
+                            )}
+                          </div>
+                          {agendamento.profile?.email && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Mail className="h-3 w-3" />
+                              {agendamento.profile.email}
                             </p>
                           )}
                         </div>
@@ -797,47 +1055,5 @@ export default function GerenciarTreinamentos() {
         </DialogContent>
       </Dialog>
     </MobileLayout>
-  );
-}
-
-interface TreinamentoCardProps {
-  treinamento: Treinamento;
-  onDelete: (id: string) => void;
-  onViewAgendamentos: () => void;
-}
-
-function TreinamentoCard({ treinamento, onDelete, onViewAgendamentos }: TreinamentoCardProps) {
-  const vagasPreenchidas = treinamento.vagas_totais - treinamento.vagas_disponiveis;
-
-  return (
-    <Card className="shadow-card">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <h4 className="font-medium text-sm">{treinamento.titulo}</h4>
-            
-            <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {treinamento.horario_inicio.substring(0, 5)} - {treinamento.horario_fim.substring(0, 5)}
-              </span>
-              <span className="flex items-center gap-1">
-                <Users className="h-3 w-3" />
-                {vagasPreenchidas}/{treinamento.vagas_totais}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" onClick={onViewAgendamentos}>
-              <Users className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => onDelete(treinamento.id)}>
-              <Trash2 className="h-4 w-4 text-destructive" />
-            </Button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
